@@ -1,0 +1,524 @@
+# model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL <- lmer(
+#   SCR_sqrt ~ CS * TUS * TRIAL * TIME + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+#   data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+#   control = lmerControl(
+#     optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+#     calc.derivs = FALSE,
+#     optimizer = "nloptwrap"
+#   )
+# )
+# 
+# # Increase limits for degrees of freedom calculations
+# emm_options(pbkrtest.limit = 4500)
+# emm_options(lmerTest.limit = 4500)
+# 
+# emm <- emmeans(model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL, 
+#                ~ TIME * CS * TUS, 
+#                by = "TRIAL", 
+#                re_formula = NULL)
+# emm_options(reset = TRUE)
+# emm_options(pbkrtest.limit = NULL)
+# emm_options(lmerTest.limit = NULL)
+# contrast(emm, interaction = "revpairwise")
+
+# TRIAL = 13:
+#   TIME_revpairwise CS_revpairwise   TUS_revpairwise estimate    SE   df t.ratio p.value
+# mid - early      threat - control active - sham     0.0325 0.214 4225   0.152  0.8791
+# late - early     threat - control active - sham    -0.0192 0.209 4225  -0.092  0.9267
+# late - mid       threat - control active - sham    -0.0517 0.129 4225  -0.400  0.6893
+# 
+# Degrees-of-freedom method: kenward-roger 
+model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL <- lmer(
+  SCR_sqrt ~ CS * TUS * TIME + log(TRIAL) + (1 + CS * TUS * TIME + log(TRIAL) | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+emm <- emmeans(model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL, 
+               ~ TIME * CS * TUS,
+               re_formula = NULL)
+contrast(emm, interaction = "revpairwise")
+
+# SLOPES
+# https://github.com/rvlenth/emmeans/issues/103
+model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL <- lmer(
+  SCR_sqrt ~ CS * TRIAL * TIME + log(TRIAL) + (1 + CS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TUS == "sham"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL)
+print(anova_acquisition_trial)
+
+emmip(model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL, CS ~ TIME, by = "TRIAL", re_formula = NULL)
+emm <- emmeans(model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL, 
+               ~ TIME * CS, 
+               by = "TRIAL", 
+               re_formula = NULL)
+contrast(emm, interaction = "revpairwise")
+
+trend_results <- emtrends(model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL,
+                          pairwise ~ CS * TIME, var = "TRIAL", re_formula = NULL)
+contrast(trend_results, interaction = "revpairwise")
+
+
+# PERHAPS FIRST PERFORM TRIAL-WISE THREAT-CONTROL DIFFERENCES BEFORE AVERAGING WITHIN TIME PERIODS
+
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    meanTime_SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$TIME <- as.numeric(scr_df_time$TIME)
+model_amygdala_acquisition_CS_TIME <- lmer(
+  meanTime_SCR_sqrt ~ CS * TIME + log(TIME) + (1 + CS * TIME + log(TIME) | SUBID),
+  data = subset(scr_df_time, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TUS == "sham"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_amygdala_acquisition_CS_TIME)
+print(anova_acquisition_trial)
+
+model_amygdala_acquisition_CS_TIME <- lmer(
+  SCR_sqrt ~ CS * TIME + log(TRIAL) + (1 + CS * TIME + log(TRIAL) | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TUS == "sham"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_amygdala_acquisition_CS_TIME)
+print(anova_acquisition_trial)
+# Perform pairwise comparisons for the CS * TimePeriod interaction
+emmeans_results <- emmeans(model_amygdala_acquisition_CS_TIME, pairwise ~ CS * TIME)
+# View the results
+emmeans_results$contrasts
+
+
+# Fit both models
+model_amygdala_acquisition_CS_TUS_TRIAL <- lmer(
+  SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TUS == "sham"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_amygdala_acquisition_CS_TUS_TRIAL)
+print(anova_acquisition_trial)
+
+model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL <- lmer(
+  SCR_sqrt ~ CS * TRIAL + log(TRIAL) + (1 + CS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TUS == "sham"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL)
+print(anova_acquisition_trial)
+
+# Perform likelihood ratio test
+anova(model_amygdala_acquisition_CS_TUS_TRIAL, model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL)
+
+
+model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL <- lmer(
+  SCR_sqrt ~ EXPERIMENT * CS * TRIAL + log(TRIAL) + (1 + CS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, PHASE == "acquisition" & US == "unreinforced" & TUS == "sham"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_amygdala_acquisition_CS_TUS_TRIAL_lnTRIAL)
+print(anova_acquisition_trial)
+
+#summary(model_amygdala_acquisition_CS_TUS_TRIAL) # For b-values and p-values
+#confint(model_amygdala_acquisition_CS_TUS_TRIAL, method = "Wald")  # For confidence intervals
+#emm <- emmeans(model_acquisition_CS_TUS_trial, ~ CS * TUS * TRIAL, re_formula = NULL)
+#pairwise_comparisons <- pairs(emm, adjust = "tukey")
+#print(pairwise_comparisons)
+#ranef(model_amygdala_acquisition_CS_TUS_TRIAL) # for individual intercepts, etc.
+
+
+create_trialplot_SCR(scr_df,amygdala,acquisition,active,unreinforced)
+create_trialplot_CSdiff_SCR(scr_df,amygdala,acquisition,active,unreinforced)
+create_trialplot_CSdiff_TUSboth_SCR(scr_df,amygdala,acquisition,unreinforced)
+create_trialplot_allCSmin_SCR(scr_df,amygdala,acquisition,active,unreinforced)
+
+create_trialplot_allCSmin_SCR(scr_df,amygdala,acquisition,sham,unreinforced)
+create_trialplot_CSdiff_TUSdiff_SCR(scr_df,amygdala,acquisition,unreinforced)
+create_trialplot_CSdiff_TUSdiff_SCR(scr_df,hippocampus,acquisition,unreinforced)
+
+create_trialplot_CSdiff_SHAMboth_SCR(scr_df,acquisition,active,unreinforced)
+
+# Fit the linear mixed-effects model
+model_amygdala_acquisition_CS_TUS_TRIAL <- lmer(
+  SCR_sqrt ~ CS * TUS * TRIAL + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_amygdala_acquisition_CS_TUS_TRIAL)
+print(anova_acquisition_trial)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#               Sum Sq Mean Sq NumDF  DenDF F value    Pr(>F)    
+# CS           0.65322 0.65322     1 27.509 10.5215  0.003090 ** 
+# TUS          0.05134 0.05134     1 26.340  0.8269  0.371403    
+# TRIAL        0.18957 0.18957     1 24.179  3.0534  0.093259 .  
+# log(TRIAL)   2.57982 2.57982     1 24.155 41.5531 1.115e-06 ***
+# CS:TUS       0.21713 0.21713     1 33.626  3.4973  0.070196 .  
+# CS:TRIAL     0.53548 0.53548     1 24.350  8.6250  0.007141 ** 
+# TUS:TRIAL    0.56581 0.56581     1 43.654  9.1134  0.004226 ** 
+# CS:TUS:TRIAL 0.26040 0.26040     1 41.486  4.1943  0.046924 *  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+emm <- emmeans(model_amygdala_acquisition_CS_TUS_TRIAL, ~ CS * TUS * TRIAL + log(TRIAL), re_formula = NULL)
+pairwise_comparisons <- pairs(emm, adjust = "tukey")
+print(pairwise_comparisons)
+
+# Define the contrast matrix
+# control:sham (1,0,0,0)
+# threat:sham (0,1,0,0)
+# control:active (0,0,1,0)
+# threat:active (0,0,0,1)
+contrast_matrix <- list(
+  "control sham vs. threat sham" = c(-1, 1, 0, 0), 
+  "control active vs. threat active" = c(-1, 1, 0, 0), 
+  "control sham vs. control active" = c(-1, 0, 1, 0), 
+  "threat sham vs. threat active" = c(0, -1, 0, 1)
+)
+
+# Apply the contrasts using emmeans' contrast() function and adjust with Tukey method
+pairwise_comparisons_interest <- contrast(emm, method = contrast_matrix, adjust = "sidak")
+
+# Print the result
+print(pairwise_comparisons_interest)
+
+# # Define the path for the output PDF file
+# pdf("anova_acquisition_trial_output.pdf")
+# 
+# # Print the ANOVA table to the PDF
+# print(anova_acquisition_trial)
+# 
+# # Close the PDF device
+# dev.off()
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  SCR_sqrt ~ CS * TUS * TRIAL + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#               Sum Sq Mean Sq NumDF  DenDF F value    Pr(>F)    
+# CS           0.79562 0.79562     1 43.838 18.1980 0.0001045 ***
+# TUS          0.02684 0.02684     1 26.378  0.6138 0.4403292    
+# TRIAL        0.65001 0.65001     1 24.593 14.8674 0.0007330 ***
+# log(TRIAL)   2.37647 2.37647     1 24.325 54.3561 1.194e-07 ***
+# CS:TUS       0.01338 0.01338     1 84.659  0.3060 0.5816300    
+# CS:TRIAL     0.66848 0.66848     1 25.966 15.2899 0.0005917 ***
+# TUS:TRIAL    0.17442 0.17442     1 28.060  3.9894 0.0555669 .  
+# CS:TUS:TRIAL 0.10198 0.10198     1 99.108  2.3325 0.1298800 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  SCR_sqrt ~ EXPERIMENT * CS * TUS * TRIAL + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+### Model failed to converge ###
+
+# Type III Analysis of Variance Table with Satterthwaite's method
+#                          Sum Sq Mean Sq NumDF  DenDF  F value    Pr(>F)    
+# EXPERIMENT               0.1707  0.1707     1 3957.8   2.0070  0.156649    
+# CS                       2.2066  2.2066     1  157.6  25.9393 9.946e-07 ***
+# TUS                      0.1550  0.1550     1   34.6   1.8220  0.185831    
+# TRIAL                    1.2244  1.2244     1   27.0  14.3931  0.000761 ***
+# log(TRIAL)              12.9554 12.9554     1   26.0 152.2961 2.254e-12 ***
+# EXPERIMENT:CS            0.0251  0.0251     1 4048.8   0.2950  0.587068    
+# EXPERIMENT:TUS           0.0045  0.0045     1 2653.7   0.0527  0.818508    
+# CS:TUS                   0.1828  0.1828     1   95.8   2.1494  0.145900    
+# EXPERIMENT:TRIAL         0.0038  0.0038     1 3545.1   0.0443  0.833248    
+# CS:TRIAL                 1.7701  1.7701     1   34.5  20.8077 6.129e-05 ***
+# TUS:TRIAL                0.9146  0.9146     1   70.6  10.7512  0.001619 ** 
+# EXPERIMENT:CS:TUS        0.1666  0.1666     1 4248.2   1.9584  0.161762    
+# EXPERIMENT:CS:TRIAL      0.0160  0.0160     1 3234.5   0.1881  0.664536    
+# EXPERIMENT:TUS:TRIAL     0.0555  0.0555     1 3741.1   0.6528  0.419156    
+# CS:TUS:TRIAL             0.3606  0.3606     1   75.4   4.2393  0.042951 *  
+# EXPERIMENT:CS:TUS:TRIAL  0.0599  0.0599     1 4129.8   0.7040  0.401486    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  SCR_sqrt ~ EXPERIMENT * CS * TRIAL + log(TRIAL) + (1 + CS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, PHASE == "acquisition" & US == "unreinforced" & TUS == "active"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+### Model failed to converge ###
+
+# Type III Analysis of Variance Table with Satterthwaite's method
+#                     Sum Sq Mean Sq NumDF   DenDF  F value    Pr(>F)    
+# EXPERIMENT          0.0815  0.0815     1 1963.36   0.9327    0.3343    
+# CS                  2.0465  2.0465     1  104.92  23.4286 4.479e-06 ***
+# TRIAL               3.0776  3.0776     1   35.09  35.2332 9.298e-07 ***
+# log(TRIAL)          9.7096  9.7096     1   27.14 111.1577 4.240e-11 ***
+# EXPERIMENT:CS       0.1525  0.1525     1 2126.91   1.7459    0.1865    
+# EXPERIMENT:TRIAL    0.0138  0.0138     1 1911.11   0.1579    0.6912    
+# CS:TRIAL            2.6542  2.6542     1   72.12  30.3863 5.204e-07 ***
+# EXPERIMENT:CS:TRIAL 0.0484  0.0484     1 1936.04   0.5543    0.4566    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  SCR_sqrt ~ EXPERIMENT * CS * TRIAL * TUS + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, PHASE == "acquisition" & US == "unreinforced" & TIME == "early"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#                         Sum Sq Mean Sq NumDF   DenDF F value    Pr(>F)    
+# EXPERIMENT              0.0000  0.0000     1 1275.24  0.0001  0.991448    
+# CS                      1.8438  1.8438     1  708.44 20.5335 6.876e-06 ***
+# TRIAL                   0.4152  0.4152     1   85.45  4.6236  0.034361 *  
+# TUS                     0.0005  0.0005     1   33.43  0.0052  0.942823    
+# log(TRIAL)              5.1692  5.1692     1  266.74 57.5677 5.466e-13 ***
+# EXPERIMENT:CS           0.0093  0.0093     1 1371.40  0.1034  0.747880    
+# EXPERIMENT:TRIAL        0.0079  0.0079     1 1211.69  0.0883  0.766433    
+# CS:TRIAL                0.8288  0.8288     1  125.15  9.2298  0.002899 ** 
+# EXPERIMENT:TUS          0.0078  0.0078     1 1206.82  0.0867  0.768485    
+# CS:TUS                  0.0138  0.0138     1   91.15  0.1532  0.696419    
+# TRIAL:TUS               0.0006  0.0006     1   44.69  0.0068  0.934851    
+# EXPERIMENT:CS:TRIAL     0.0205  0.0205     1 1342.08  0.2282  0.632959    
+# EXPERIMENT:CS:TUS       0.0000  0.0000     1 1361.64  0.0003  0.987052    
+# EXPERIMENT:TRIAL:TUS    0.0000  0.0000     1 1244.39  0.0001  0.992427    
+# CS:TRIAL:TUS            0.0013  0.0013     1  129.16  0.0146  0.903954    
+# EXPERIMENT:CS:TRIAL:TUS 0.0550  0.0550     1 1351.18  0.6122  0.434108 
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  SCR_sqrt ~ EXPERIMENT * CS * TUS * TRIAL + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#                          Sum Sq Mean Sq NumDF   DenDF  F value    Pr(>F)    
+# EXPERIMENT               0.0001  0.0001     1 2574.47   0.0006 0.9802498    
+# CS                       2.6898  2.6898     1  314.50  31.0512 5.405e-08 ***
+# TUS                      0.0062  0.0062     1   33.88   0.0721 0.7898917    
+# TRIAL                    1.2709  1.2709     1   34.44  14.6715 0.0005176 ***
+# log(TRIAL)              12.4009 12.4009     1   29.24 143.1549 8.667e-13 ***
+# EXPERIMENT:CS            0.0126  0.0126     1 2700.39   0.1452 0.7031893    
+# EXPERIMENT:TUS           0.0026  0.0026     1 2066.25   0.0298 0.8630558    
+# CS:TUS                   0.0000  0.0000     1   75.86   0.0000 0.9948983    
+# EXPERIMENT:TRIAL         0.1387  0.1387     1 2345.92   1.6015 0.2058212    
+# CS:TRIAL                 2.1065  2.1065     1   63.91  24.3176 6.118e-06 ***
+# TUS:TRIAL                0.0053  0.0053     1   63.65   0.0610 0.8057628    
+# EXPERIMENT:CS:TUS        0.2521  0.2521     1 2737.46   2.9103 0.0881316 . !!!!! 
+# EXPERIMENT:CS:TRIAL      0.0206  0.0206     1 2698.13   0.2382 0.6255152    
+# EXPERIMENT:TUS:TRIAL     0.0337  0.0337     1 2478.57   0.3896 0.5325841    
+# CS:TUS:TRIAL             0.0274  0.0274     1  118.91   0.3165 0.5747688    
+# EXPERIMENT:CS:TUS:TRIAL  0.1103  0.1103     1 2752.62   1.2735 0.2592097    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  SCR_sqrt ~ EXPERIMENT * CS * TUS * TRIAL + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, PHASE == "acquisition" & US == "unreinforced" & (TIME == "mid" | TIME == "late")),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#                          Sum Sq Mean Sq NumDF   DenDF F value   Pr(>F)   
+# EXPERIMENT              0.44727 0.44727     1 2398.34  5.5727 0.018322 * 
+# CS                      0.75583 0.75583     1   60.48  9.4170 0.003216 **
+# TUS                     0.24575 0.24575     1   67.53  3.0619 0.084692 . 
+# TRIAL                   0.63060 0.63060     1  101.97  7.8568 0.006061 **
+# log(TRIAL)              0.32109 0.32109     1  266.56  4.0005 0.046502 * 
+# EXPERIMENT:CS           0.00123 0.00123     1 2369.49  0.0153 0.901583   
+# EXPERIMENT:TUS          0.00105 0.00105     1 2537.36  0.0131 0.908822   
+# CS:TUS                  0.29209 0.29209     1   52.54  3.6393 0.061904 . 
+# EXPERIMENT:TRIAL        0.13972 0.13972     1 2266.54  1.7409 0.187164   
+# CS:TRIAL                0.37705 0.37705     1   27.13  4.6977 0.039146 * 
+# TUS:TRIAL               0.78104 0.78104     1   72.67  9.7312 0.002598 **
+# EXPERIMENT:CS:TUS       0.00725 0.00725     1 2575.12  0.0903 0.763830   
+# EXPERIMENT:CS:TRIAL     0.00743 0.00743     1 2193.92  0.0926 0.760978   
+# EXPERIMENT:TUS:TRIAL    0.00002 0.00002     1 2524.29  0.0002 0.988502   
+# CS:TUS:TRIAL            0.47215 0.47215     1   65.78  5.8826 0.018043 * 
+# EXPERIMENT:CS:TUS:TRIAL 0.00838 0.00838     1 2658.60  0.1044 0.746659   
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    meanTime_SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  meanTime_SCR_sqrt ~ CS * TUS + (1 + CS + TUS | SUBID),
+  data = subset(scr_df_time, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TIME == "early"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  meanTime_SCR_sqrt ~ CS * TUS + (1 + CS + TUS | SUBID),
+  data = subset(scr_df_time, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TIME == "mid"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  meanTime_SCR_sqrt ~ CS * TUS + (1 + CS + TUS | SUBID),
+  data = subset(scr_df_time, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TIME == "late"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  meanTime_SCR_sqrt ~ CS * TUS + (1 + CS + TUS | SUBID),
+  data = subset(scr_df_time, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced" & TIME == "early"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  meanTime_SCR_sqrt ~ CS * TUS + (1 + CS + TUS | SUBID),
+  data = subset(scr_df_time, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced" & TIME == "mid"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+
+
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    meanTime_SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  meanTime_SCR_sqrt ~ CS * TUS + (1 + CS + TUS | SUBID),
+  data = subset(scr_df_time, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced" & TIME == "late"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#          Sum Sq  Mean Sq NumDF  DenDF F value    Pr(>F)    
+# CS     0.163595 0.163595     1 24.000 26.1960 3.082e-05 ***
+# TUS    0.060637 0.060637     1 24.001  9.7095  0.004703 ** 
+# CS:TUS 0.025707 0.025707     1 24.002  4.1164  0.053701 .  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+
+
+
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_TUS_trial <- lmer(
+  meanTime_SCR_sqrt ~ EXPERIMENT * CS * TUS + (1 + CS + TUS | SUBID),
+  data = subset(scr_df_time, PHASE == "acquisition" & US == "unreinforced" & TIME == "early"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova_acquisition_trial <- anova(model_acquisition_CS_TUS_trial)
+print(anova_acquisition_trial)

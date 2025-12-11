@@ -1,0 +1,46 @@
+CS.TUS.TRIAL.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS + TRIAL | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+CS.TUS.TRIAL.HABI.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TRIAL + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TRIAL.HABI.model.amygdala.acquisition.unreinforced)
+
+anova(CS.TUS.TRIAL.model.amygdala.acquisition.unreinforced, CS.TUS.TRIAL.HABI.model.amygdala.acquisition.unreinforced)
+
+# acquisition: US #
+scr_df_amy_acq_US_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         US == "reinforced")
+
+# acquisition: US #
+
+model <- lmer(
+  SCR_sqrt ~ TUS + (1 + TUS | SUBID),
+  data = scr_df_amy_acq_US_TUS,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["TUS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["TUS", "NumDF"]
+df_den <- round(anova_model["TUS", "DenDF"])
+p_value <- anova_model["TUS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "TUS",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_amy_acq_CS_TTUS", "\n",
+    "Model: SCR_sqrt ~ US + (1 + US | SUBID)","\n",
+    "Stats:", stats)
+

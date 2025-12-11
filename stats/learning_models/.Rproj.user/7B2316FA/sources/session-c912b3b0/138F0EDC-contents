@@ -1,0 +1,89 @@
+library(here)
+library(lmerTest)
+library(effectsize)
+library(glue)
+library(tibble)
+library(dplyr)
+
+# Load the list of data frames saved earlier
+dfs <- readRDS(here::here("data", "lme_model_data_list.rds"))
+
+ctrl_nlopt <- lmerControl(
+  optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+  calc.derivs = FALSE,
+  optimizer = "nloptwrap",
+  check.conv.singular = "ignore"
+)
+
+# Helper to fetch a df from the list safely
+get_df <- function(name) {
+  if (!name %in% names(dfs)) stop("Data frame '", name, "' not found in list.")
+  dfs[[name]]
+}
+
+# Results accumulator (3 columns)
+model_results <- tibble(
+  data = character(),
+  `effect name` = character(),
+  stats = character()
+)
+
+# General runner: fit, ANOVA row, partial eta², pretty print, and append to results
+run_lmer_test <- function(data_name, formula, effect_name, label = NULL) {
+  d <- get_df(data_name)
+  
+  # fully suppress convergence-related warnings during fitting and post-hoc computations
+  suppressWarnings({
+    model   <- lmer(formula, data = d, control = ctrl_nlopt)
+    aov_tab <- anova(model)
+    eta     <- eta_squared(model, partial = TRUE)
+  })
+  
+  if (!effect_name %in% rownames(aov_tab)) {
+    warning(glue("Effect '{effect_name}' not found in ANOVA table for {data_name}."))
+    print(aov_tab)
+    return(invisible(list(model = model, anova = aov_tab, eta = NA)))
+  }
+  
+  F_value <- format(aov_tab[effect_name, "F value"], digits = 2, nsmall = 2)
+  df_num  <- aov_tab[effect_name, "NumDF"]
+  df_den  <- round(aov_tab[effect_name, "DenDF"])
+  p_value <- aov_tab[effect_name, "Pr(>F)"]
+  p_fmt   <- ifelse(p_value < 1e-4, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+  
+  eta_val <- if (effect_name %in% eta$Parameter) {
+    sprintf("%.2f", eta$Eta2_partial[eta$Parameter == effect_name])
+  } else {
+    maybe <- grep(paste0("^", gsub("([: *()+-])", "\\\\\\1", effect_name), "$"),
+                  eta$Parameter, value = TRUE)
+    if (length(maybe)) sprintf("%.2f", eta$Eta2_partial[eta$Parameter == maybe[1]]) else "NA"
+  }
+  
+  # Pretty console output
+  stats_console <- glue(
+    "\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, ",
+    "\033[3mp\033[0m = {p_fmt}, ηₚ² = {eta_val}"
+  )
+  
+  stats_csv <- glue(
+    "F({df_num}, {df_den}) = {F_value}, p = {p_fmt}, ηₚ² = {eta_val}"
+  )
+  
+  cat("\n-------------------------------------------\n",
+      "Data: ", data_name, "\n",
+      "Model:", deparse(formula), "\n",
+      if (!is.null(label)) paste0("Label: ", label, "\n") else "",
+      "Stats:", stats_console, "\n", sep = "")
+  
+  # Append to global results table
+  row <- tibble::tibble(
+    data = sub("^scr_df_", "", data_name),
+    `effect name` = effect_name,
+    stats = as.character(stats_csv)
+  )
+  model_results <<- dplyr::bind_rows(model_results, row)
+  
+  invisible(list(model = model, anova = aov_tab, eta = eta))
+}
+
+dz_from_t <- function(t, n) t / sqrt(n)

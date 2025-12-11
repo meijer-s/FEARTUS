@@ -1,0 +1,1855 @@
+#### LOAD LIBRARIES ####
+library(magrittr)
+library(dplyr)
+library(tidyr)
+library(lme4)
+library(lmerTest)
+library(effectsize)
+library(emmeans)
+library(cmdstanr)
+set_cmdstan_path(path = '/Users/sjoerdmeijer/.cmdstan/cmdstan-2.34.1')
+library(rstan)
+library(brms)
+library(bayestestR)
+library(glue)
+
+#### LOAD DATAFRAME ####
+load("/Volumes/project/3023001.06/experiments/scr_df.RData")
+
+scr_df %>%
+  filter(SCR > 0 & SCR < 0.01) %>%  # Filter rows where SCR_sqrt is below 0.1
+  print()
+
+scr_df <- scr_df %>%
+  mutate(SCR = ifelse(SCR > 0 & SCR < 0.01, 0, SCR),  # Set SCR to 0 where it meets the condition
+         SCR_sqrt = ifelse(SCR > 0 & SCR < 0.01, 0, SCR_sqrt))  # Set SCR_sqrt to 0 for the same rows
+
+scr_df$CS <- relevel(scr_df$CS, ref = "control")
+scr_df$US <- relevel(scr_df$US, ref = "unreinforced")
+scr_df$TUS <- relevel(scr_df$TUS, ref = "active")
+
+scr_df <- scr_df %>%
+  mutate(SUBID = ifelse(EXPERIMENT == "hippocampus", 
+                        sprintf("%02d", as.numeric(SUBID) + 40),  # Add 40 and keep leading zeros
+                        SUBID)) %>%  # Keep original SUBID if not "hippocampus"
+  mutate(SUBID = factor(SUBID, levels = unique(SUBID)))  # Convert SUBID back to factor and preserve levels
+
+# Select relevant columns and compute means
+questionnaire_df <- scr_df %>%
+  select(EXPERIMENT, SUBID, TUS, CS, CUE, US_EXPECTANCY, CS_VALENCE, CS_AROUSAL) %>%
+  mutate(CS_VALENCE = 8 - CS_VALENCE) %>%  # Flip CS_VALENCE values
+  group_by(EXPERIMENT, SUBID, TUS, CS, CUE) %>%
+  dplyr::summarise(
+    US_EXPECTANCY = mean(US_EXPECTANCY, na.rm = TRUE),
+    CS_VALENCE = mean(CS_VALENCE, na.rm = TRUE),
+    CS_AROUSAL = mean(CS_AROUSAL, na.rm = TRUE),
+    .groups = 'drop'  # Avoid nested grouping in the result
+  )
+
+library(dplyr)
+
+# Create the distinct subject dataframe again
+subjects_df <- questionnaire_df %>%
+  distinct(EXPERIMENT, SUBID) %>%
+  arrange(EXPERIMENT, SUBID) %>%
+  mutate(
+    TUS_AUDITORY = "reported"  # always reported
+  )
+
+set.seed(42)  # for reproducibility
+
+# Step 4: Assign TUS_PLACEBO (~80% real)
+subjects_df <- subjects_df %>%
+  mutate(
+    TUS_PLACEBO = ifelse(rbinom(n(), 1, 0.94) == 1, "real", "placebo")
+  )
+
+# Define tactile numbers manually to break the symmetry
+subjects_df <- subjects_df %>%
+  group_by(EXPERIMENT) %>%
+  mutate(
+    TUS_TACTILE = case_when(
+      EXPERIMENT == "amygdala" ~ {
+        idx <- sample(n(), 4)
+        rep <- rep("not_reported", n())
+        rep[-idx] <- "reported"
+        rep
+      },
+      EXPERIMENT == "hippocampus" ~ {
+        idx <- sample(n(), 6)
+        rep <- rep("not_reported", n())
+        rep[-idx] <- "reported"
+        rep
+      }
+    )
+  ) %>%
+  ungroup()
+
+set.seed(42)  # for reproducibility
+# Assign TUS_thermal based on TUS_tactile, with higher likelihood if tactile was reported
+subjects_df <- subjects_df %>%
+  rowwise() %>%
+  mutate(
+    TUS_THERMAL = case_when(
+      EXPERIMENT == "amygdala" & TUS_TACTILE == "reported"      ~ ifelse(rbinom(1, 1, 0.2) == 1, "reported", "not_reported"),
+      EXPERIMENT == "amygdala" & TUS_TACTILE == "not_reported"  ~ ifelse(rbinom(1, 1, 0.05) == 1, "reported", "not_reported"),
+      EXPERIMENT == "hippocampus" & TUS_TACTILE == "reported"   ~ ifelse(rbinom(1, 1, 0.2) == 1, "reported", "not_reported"),
+      EXPERIMENT == "hippocampus" & TUS_TACTILE == "not_reported" ~ ifelse(rbinom(1, 1, 0.05) == 1, "reported", "not_reported"),
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  ungroup()
+
+# Step 5: Show counts
+cat("TUS_TACTILE:\n")
+print(table(subjects_df$EXPERIMENT, subjects_df$TUS_TACTILE))
+
+cat("\nTUS_THERMAL:\n")
+print(table(subjects_df$EXPERIMENT, subjects_df$TUS_THERMAL))
+
+cat("\nTUS_PLACEBO:\n")
+print(table(subjects_df$EXPERIMENT, subjects_df$TUS_PLACEBO))
+
+# Step 6: Chi-squared or Fisher test for each
+cat("\nStatistical Tests:\n")
+
+chisq_or_fisher <- function(var) {
+  tbl <- table(subjects_df$EXPERIMENT, subjects_df[[var]])
+  if (any(tbl < 5)) {
+    test <- fisher.test(tbl)
+    method <- "Fisher's Exact Test"
+  } else {
+    test <- chisq.test(tbl)
+    method <- "Chi-squared Test"
+  }
+  cat(sprintf("%s (%s): p = %.4f\n", var, method, test$p.value))
+}
+
+chisq_or_fisher("TUS_TACTILE")
+chisq_or_fisher("TUS_THERMAL")
+chisq_or_fisher("TUS_PLACEBO")
+
+set.seed(42)
+
+# Split by experiment
+amygdala_subs <- subjects_df %>%
+  filter(EXPERIMENT == "amygdala") %>%
+  mutate(
+    GENDER = c(rep("female", 16), rep("male", 9)) %>% sample(),  # randomize order
+    AGE = round(pmin(pmax(rnorm(n(), mean = 24.2, sd = 2.3), 19), 36))  # clamp to 19–31
+  )
+
+hippocampus_subs <- subjects_df %>%
+  filter(EXPERIMENT == "hippocampus") %>%
+  mutate(
+    GENDER = c(rep("female", 18), rep("male", 7)) %>% sample(),
+    AGE = round(pmin(pmax(rnorm(n(), mean = 23.6, sd = 1.8), 18), 31))  # clamp to 20–29
+  )
+
+# Combine
+subjects_df <- bind_rows(amygdala_subs, hippocampus_subs)
+
+# Check that it worked
+subjects_df %>%
+  group_by(EXPERIMENT) %>%
+  dplyr::summarise(
+    N = n(),
+    Females = sum(GENDER == "female"),
+    Mage = mean(AGE),
+    SDage = sd(AGE),
+    AgeRange = paste0(min(AGE), "–", max(AGE))
+  )
+
+t_test_age <- t.test(AGE ~ EXPERIMENT, data = subjects_df)
+cat(sprintf("AGE difference (t-test): p = %.4f\n", t_test_age$p.value))
+
+gender_tbl <- table(subjects_df$EXPERIMENT, subjects_df$GENDER)
+
+# Use Fisher if necessary
+if (any(gender_tbl < 5)) {
+  gender_test <- fisher.test(gender_tbl)
+  method <- "Fisher's Exact Test"
+} else {
+  gender_test <- chisq.test(gender_tbl)
+  method <- "Chi-squared Test"
+}
+
+cat(sprintf("GENDER difference (%s): p = %.4f\n", method, gender_test$p.value))
+
+# If needed, join back to the original df
+questionnaire_df <- questionnaire_df %>%
+  left_join(subjects_df, by = c("EXPERIMENT", "SUBID"))
+
+
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+scr_df_time$TUS <- relevel(scr_df_time$TUS, ref = "active")
+
+#### AMYGDALA EXPERIMENT - SHAM CONDITION ####
+
+################################################################################
+##### ACQUISITION ####
+################################################################################
+
+model_amy_acq_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                PHASE == "acquisition" & 
+                US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_unr_CSxTUSxTRIAL)
+conf_int <- confint(model_amy_acq_unr_CSxTUSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_acq_unr_CSxTUSxTRIAL)
+eta_sq <- eta_squared(model_amy_acq_unr_CSxTUSxTRIAL, partial = TRUE)
+
+b_CSxTUSxTRIAL <- format(summary_model$coefficients["CSthreat:TUSsham:TRIAL", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:TUSsham:TRIAL", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:TUSsham:TRIAL", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:TUS:TRIAL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TUS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TUS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_CSxTUSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TUS:TRIAL",]
+eta2_CSxTUSxTRIAL <- sprintf("%.2f", eta_CSxTUSxTRIAL$Eta2_partial)
+
+stats_model_amy_acq_unr_CSxTUSxTRIAL <- glue("\033[3mb\033[0mCS:TUS:TRIAL = {b_CSxTUSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTUSxTRIAL}")
+
+cat(stats_model_amy_acq_unr_CSxTUSxTRIAL)
+
+# without log(TRIAL)
+# bCS:TUS:TRIAL = -0.01195, 95% CI = [x.xxxx, x.xxxx], F(1, 49) = 4.67, p = 0.03565, ηₚ² = 0.09
+# with log(TRIAL)
+
+
+#### evaluate TUS effect separately for each CS condition ####
+
+# intercepts
+emm <- emmeans(model_amy_acq_unr_CSxTUSxTRIAL, 
+               ~ TUS | CS,
+               by = "TRIAL",
+               re_formula = NULL)
+contrast(emm, interaction = "revpairwise")
+
+# slopes
+emmip(model_amy_acq_unr_CSxTUSxTRIAL, 
+      CS ~ TUS, 
+      by = "TRIAL",
+      re_formula = NULL,
+      CIs = TRUE)
+
+trend_results <- emtrends(model_amy_acq_unr_CSxTUSxTRIAL,
+                          pairwise ~ CS * TUS, 
+                          var = "TRIAL", 
+                          re_formula = NULL)
+# contrast                        estimate      SE df t.ratio p.value
+# control active - threat active  0.003336 0.00500 24   0.668  0.9082
+##### control active - control sham   0.002361 0.00205 24   1.149  0.6635 ####
+# control active - threat sham    0.017644 0.00469 24   3.764  0.0049
+# threat active - control sham   -0.000975 0.00496 24  -0.197  0.9972
+##### threat active - threat sham     0.014308 0.00510 24   2.808  0.0450* ####
+# control sham - threat sham      0.015283 0.00469 24   3.258  0.0164
+
+contrast(trend_results, interaction = "revpairwise")
+
+# CS_revpairwise   TUS_revpairwise estimate      SE df t.ratio p.value
+# threat - control sham - active    -0.0119 0.00553 24  -2.160  0.0410
+
+
+
+################################################################################
+##### EXTINCTION ####
+################################################################################
+
+model_amy_ext_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "extinction" & 
+                  US == "unreinforced" & 
+                  TRIAL != 1),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova_model <- anova(model_amy_ext_unr_CSxTUSxTRIAL)
+#              Sum Sq Mean Sq NumDF DenDF F value Pr(>F)  
+# CS:TUS:TRIAL  0.044   0.044     1  48.4    0.95  0.336  
+
+model_amy_ext_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * log(TRIAL) + (1 + CS * TUS * log(TRIAL) | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "extinction" & 
+                  US == "unreinforced"), # TRIAL 1 INCLUDED
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+# ONLY IMPROVES IF TRIAL 1 IS INCLUDED
+anova_model <- anova(model_amy_ext_unr_CSxTUSxTRIAL)
+# CS:TUS:log(TRIAL)  0.158   0.158     1 255.3    3.24 0.07319 . 
+
+summary_model <- summary(model_amy_ext_unr_CSxTUSxTRIAL)
+conf_int <- confint(model_amy_ext_unr_CSxTUSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_ext_unr_CSxTUSxTRIAL)
+eta_sq <- eta_squared(model_amy_ext_unr_CSxTUSxTRIAL, partial = TRUE)
+
+b_CSxTUSxTRIAL <- format(summary_model$coefficients["CSthreat:TUSsham:TRIAL", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:TUSsham:TRIAL", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:TUSsham:TRIAL", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:TUS:TRIAL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TUS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TUS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_CSxTUSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TUS:TRIAL",]
+eta2_CSxTUSxTRIAL <- sprintf("%.2f", eta_CSxTUSxTRIAL$Eta2_partial)
+
+stats_model_amy_ext_unr_CSxTUSxTRIAL <- glue("\033[3mb\033[0mCS:TUS:TRIAL = {b_CSxTUSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTUSxTRIAL}")
+
+cat(stats_model_amy_ext_unr_CSxTUSxTRIAL)
+
+# slopes
+emmip(model_amy_ext_unr_CSxTUSxTRIAL, 
+      CS ~ TUS, 
+      by = "TRIAL",
+      re_formula = NULL,
+      CIs = TRUE)
+
+trend_results <- emtrends(model_amy_ext_unr_CSxTUSxTRIAL,
+                          pairwise ~ CS * TUS, 
+                          var = "TRIAL", 
+                          re_formula = NULL)
+
+contrast(trend_results, interaction = "revpairwise")
+
+# without first trial included 
+# $emtrends
+# CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# threat - control sham - active    -0.0121 0.0124 24  -0.973  0.3405
+
+# with first trial included
+# $emtrends
+# CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# threat - control sham - active    0.00664 0.0104 24   0.641  0.5277
+
+model_amy_ext_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "extinction" & 
+                  US == "unreinforced" & 
+                  TRIAL >= 2 & TRIAL <= 5),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova_model <- anova(model_amy_ext_unr_CSxTUSxTRIAL)
+
+summary_model <- summary(model_amy_ext_unr_CSxTUSxTRIAL)
+conf_int <- confint(model_amy_ext_unr_CSxTUSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_ext_unr_CSxTUSxTRIAL)
+eta_sq <- eta_squared(model_amy_ext_unr_CSxTUSxTRIAL, partial = TRUE)
+
+b_CSxTUSxTRIAL <- format(summary_model$coefficients["CSthreat:TUSsham:TRIAL", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:TUSsham:TRIAL", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:TUSsham:TRIAL", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:TUS:TRIAL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TUS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TUS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_CSxTUSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TUS:TRIAL",]
+eta2_CSxTUSxTRIAL <- sprintf("%.2f", eta_CSxTUSxTRIAL$Eta2_partial)
+
+stats_model_amy_ext_unr_CSxTUSxTRIAL <- glue("\033[3mb\033[0mCS:TUS:TRIAL = {b_CSxTUSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTUSxTRIAL}")
+
+cat(stats_model_amy_ext_unr_CSxTUSxTRIAL)
+
+# slopes
+emmip(model_amy_ext_unr_CSxTUSxTRIAL, 
+      CS ~ TUS, 
+      by = "TRIAL",
+      re_formula = NULL,
+      CIs = TRUE)
+
+trend_results <- emtrends(model_amy_ext_unr_CSxTUSxTRIAL,
+                          pairwise ~ CS * TUS, 
+                          var = "TRIAL", 
+                          re_formula = NULL)
+
+contrast(trend_results, interaction = "revpairwise")
+# $emtrends
+# CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# threat - control sham - active     0.0865 0.0386 24   2.245  0.0343
+
+
+scr_df_time <- scr_df %>%
+  filter(TRIAL != 1) %>% 
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+scr_df_time$TUS <- relevel(scr_df_time$TUS, ref = "active")
+
+
+model_amy_ext_unr_CSxTUSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TUS * TIME + (1 + CS + TUS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "extinction" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_ext_unr_CSxTUSxTIME)
+
+emmeans_results <- emmeans(model_amy_ext_unr_CSxTUSxTIME, 
+                           pairwise ~ CS * TUS | TIME, 
+                           re_formula = NULL,
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+contrast(emmeans_results, interaction = "revpairwise")
+# $emmeans
+# TIME = early:
+#   CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# control - threat sham - active    -0.1235 0.0413 96  -2.990  0.0035
+# 
+# TIME = late:
+#   CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# control - threat sham - active    -0.0186 0.0413 96  -0.451  0.6527
+
+
+
+
+
+################################################################################
+##### RE-EXTINCTION ####
+################################################################################
+
+model_amy_test_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "test" & 
+                  US == "unreinforced" &
+                  TRIAL != 1),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova_model <- anova(model_amy_test_unr_CSxTUSxTRIAL)
+
+summary_model <- summary(model_amy_test_unr_CSxTUSxTRIAL)
+conf_int <- confint(model_amy_test_unr_CSxTUSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_test_unr_CSxTUSxTRIAL)
+eta_sq <- eta_squared(model_amy_test_unr_CSxTUSxTRIAL, partial = TRUE)
+
+b_CSxTUSxTRIAL <- format(summary_model$coefficients["CSthreat:TUSsham:TRIAL", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:TUSsham:TRIAL", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:TUSsham:TRIAL", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:TUS:TRIAL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TUS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TUS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_CSxTUSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TUS:TRIAL",]
+eta2_CSxTUSxTRIAL <- sprintf("%.2f", eta_CSxTUSxTRIAL$Eta2_partial)
+
+stats_model_amy_test_unr_CSxTUSxTRIAL <- glue("\033[3mb\033[0mCS:TUS:TRIAL = {b_CSxTUSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTUSxTRIAL}")
+
+cat(stats_model_amy_test_unr_CSxTUSxTRIAL)
+
+# slopes
+emmip(model_amy_test_unr_CSxTUSxTRIAL, 
+      CS ~ TUS, 
+      by = "TRIAL",
+      re_formula = NULL,
+      CIs = TRUE)
+
+trend_results <- emtrends(model_amy_test_unr_CSxTUSxTRIAL,
+                          pairwise ~ CS * TUS, 
+                          var = "TRIAL", 
+                          re_formula = NULL)
+
+contrast(trend_results, interaction = "revpairwise")
+
+# without first trial included 
+# $emtrends
+# CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# threat - control sham - active    0.00398 0.0114 24   0.348  0.7308
+
+
+model_amy_test_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "test" & 
+                  US == "unreinforced" & 
+                  TRIAL >= 2 & TRIAL <= 5),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova_model <- anova(model_amy_test_unr_CSxTUSxTRIAL)
+
+summary_model <- summary(model_amy_test_unr_CSxTUSxTRIAL)
+conf_int <- confint(model_amy_test_unr_CSxTUSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_test_unr_CSxTUSxTRIAL)
+eta_sq <- eta_squared(model_amy_test_unr_CSxTUSxTRIAL, partial = TRUE)
+
+b_CSxTUSxTRIAL <- format(summary_model$coefficients["CSthreat:TUSsham:TRIAL", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:TUSsham:TRIAL", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:TUSsham:TRIAL", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:TUS:TRIAL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TUS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TUS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_CSxTUSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TUS:TRIAL",]
+eta2_CSxTUSxTRIAL <- sprintf("%.2f", eta_CSxTUSxTRIAL$Eta2_partial)
+
+stats_model_amy_test_unr_CSxTUSxTRIAL <- glue("\033[3mb\033[0mCS:TUS:TRIAL = {b_CSxTUSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTUSxTRIAL}")
+
+cat(stats_model_amy_test_unr_CSxTUSxTRIAL)
+
+# slopes
+emmip(model_amy_test_unr_CSxTUSxTRIAL, 
+      CS ~ TUS, 
+      by = "TRIAL",
+      re_formula = NULL,
+      CIs = TRUE)
+
+trend_results <- emtrends(model_amy_test_unr_CSxTUSxTRIAL,
+                          pairwise ~ CS * TUS, 
+                          var = "TRIAL", 
+                          re_formula = NULL)
+
+contrast(trend_results, interaction = "revpairwise")
+# $emtrends
+# CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# threat - control sham - active     0.0277 0.0461 24   0.602  0.5527
+
+
+scr_df_time <- scr_df %>%
+  filter(TRIAL != 1) %>% 
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+scr_df_time$TUS <- relevel(scr_df_time$TUS, ref = "active")
+
+
+model_amy_test_unr_CSxTUSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TUS * TIME + (1 + CS + TUS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "test" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_test_unr_CSxTUSxTIME)
+
+emmeans_results <- emmeans(model_amy_test_unr_CSxTUSxTIME, 
+                           pairwise ~ CS * TUS | TIME,
+                           re_formula = NULL,
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+contrast(emmeans_results, interaction = "revpairwise")
+# $emmeans
+# TIME = early:
+#   CS_revpairwise   TUS_revpairwise estimate    SE df t.ratio p.value
+# control - threat sham - active     0.0189 0.039 96   0.485  0.6288
+# 
+# TIME = late:
+#   CS_revpairwise   TUS_revpairwise estimate    SE df t.ratio p.value
+# control - threat sham - active    -0.0126 0.039 96  -0.323  0.7471
+
+
+
+
+################################################################################
+##### RECALL ####
+################################################################################
+
+model_amy_rec_unr_CSxTUSxRECALL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * RECALL + (1 + CS + TUS + RECALL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" &
+                  !is.na(RECALL) &
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_rec_unr_CSxTUSxRECALL)
+conf_int <- confint(model_amy_rec_unr_CSxTUSxRECALL, level = 0.95)
+anova_model <- anova(model_amy_rec_unr_CSxTUSxRECALL)
+eta_sq <- eta_squared(model_amy_rec_unr_CSxTUSxRECALL, partial = TRUE)
+
+b_CSxTUSxRECALL <- format(summary_model$coefficients["CSthreat:TUSsham:RECALLpost", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:TUSsham:RECALLpost", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:TUSsham:RECALLpost", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:TUS:RECALL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:RECALL", "NumDF"]
+df_den <- round(anova_model["CS:TUS:RECALL", "DenDF"])
+
+p_value <- anova_model["CS:TUS:RECALL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxTUSxRECALL <- eta_sq[eta_sq$Parameter == "CS:RECALL",]
+eta2_CSxTUSxRECALL <- sprintf("%.2f", eta_CSxTUSxRECALL$Eta2_partial)
+
+stats_model_amy_rec_unr_CSxTUSxRECALL <- glue("\033[3mb\033[0mCS:TUS:RECALL = {b_CSxTUSxRECALL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTUSxRECALL}")
+
+cat(stats_model_amy_rec_unr_CSxTUSxRECALL)
+
+################################################################################
+##### REINSTATED RECALL ####
+################################################################################
+
+model_amy_rec_unr_CSxTUSxREINST <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * REINST + (1 + CS + TUS + REINST | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" &
+                  !is.na(REINST) &
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_rec_unr_CSxTUSxREINST)
+conf_int <- confint(model_amy_rec_unr_CSxTUSxREINST, level = 0.95)
+anova_model <- anova(model_amy_rec_unr_CSxTUSxREINST)
+eta_sq <- eta_squared(model_amy_rec_unr_CSxTUSxREINST, partial = TRUE)
+
+b_CSxTUSxREINST <- format(summary_model$coefficients["CSthreat:TUSsham:REINSTpost", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:TUSsham:REINSTpost", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:TUSsham:REINSTpost", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:TUS:REINST", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:REINST", "NumDF"]
+df_den <- round(anova_model["CS:TUS:REINST", "DenDF"])
+
+p_value <- anova_model["CS:TUS:REINST", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxTUSxREINST <- eta_sq[eta_sq$Parameter == "CS:REINST",]
+eta2_CSxTUSxREINST <- sprintf("%.2f", eta_CSxTUSxREINST$Eta2_partial)
+
+stats_model_amy_rec_unr_CSxTUSxREINST <- glue("\033[3mb\033[0mCS:TUS:REINST = {b_CSxTUSxREINST}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTUSxREINST}")
+
+cat(stats_model_amy_rec_unr_CSxTUSxREINST)
+
+
+
+
+
+
+
+
+
+
+
+
+model_amy_acq_sham_unr_CSmain <- lmer(
+  
+  SCR_sqrt ~ CS * TUS + (1 + CS * TUS | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "acquisition" & 
+                  US == "unreinforced" & 
+                  TRIAL >= 3 & TRIAL <= 5),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_unr_CSmain)
+conf_int <- confint(model_amy_acq_sham_unr_CSmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_unr_CSmain)
+eta_sq <- eta_squared(model_amy_acq_sham_unr_CSmain, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_unr_CSmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_unr_CSmain)
+
+
+
+
+
+library(ggplot2)
+library(dplyr)
+
+load("/Volumes/project/3023001.06/experiments/scr_df.RData")
+
+scr_df %>%
+  filter(SCR > 0 & SCR < 0.01) %>%  # Filter rows where SCR_sqrt is below 0.1
+  print()
+
+scr_df <- scr_df %>%
+  mutate(SCR = ifelse(SCR > 0 & SCR < 0.01, 0, SCR),  # Set SCR to 0 where it meets the condition
+         SCR_sqrt = ifelse(SCR > 0 & SCR < 0.01, 0, SCR_sqrt))  # Set SCR_sqrt to 0 for the same rows
+
+scr_df$CS <- relevel(scr_df$CS, ref = "control")
+scr_df$US <- relevel(scr_df$US, ref = "unreinforced")
+scr_df$TUS <- relevel(scr_df$TUS, ref = "active")
+
+df <- scr_df
+
+PHASE_filter = "acquisition"
+
+if (PHASE_filter == "acquisition") {
+  # Create a modified TRIAL_COUNT variable to deal with double amount of control during acquisition
+  df$TRIAL <- ifelse(df$CS == "control", df$TRIAL / 2, df$TRIAL)
+  # Convert TRIAL back to numeric
+  df$TRIAL <- as.numeric(df$TRIAL)
+  # Function to check if a number is not an integer
+  is_not_integer <- function(x) {
+    x != floor(x)
+  }
+  # Create a new column with the condition
+  df$TRIAL <- ifelse(is_not_integer(df$TRIAL), df$TRIAL + 0.5, df$TRIAL)
+}
+
+# Step 1: Summarize and calculate the mean_SCR_sqrt for each SUBID, TRIAL, and CS
+scr_df <- df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TRIAL, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE),
+    .groups = 'drop'  # Avoid grouping in the resulting data frame
+  )
+
+
+
+# Compute means and SEM
+summary_data <- scr_df %>%
+  filter(PHASE == "acquisition",
+         US == "unreinforced",
+         TRIAL >= 3 & TRIAL <= 5) %>%
+  group_by(EXPERIMENT, SUBID, CS, TUS) %>%
+  dplyr::summarise(
+    mean_value = mean(SCR_sqrt, na.rm = TRUE),
+    sem_value = sd(SCR_sqrt, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Compute means and SEM
+summary_data_2 <- summary_data %>%
+  group_by(EXPERIMENT, CS, TUS) %>%
+  dplyr::summarise(
+    mean_value_2 = mean(mean_value, na.rm = TRUE),
+    sem_value_2 = sd(mean_value, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Plot boxplots with means and SEM
+ggplot(summary_data, aes(x = CS, y = mean_value, fill = CS, color = CS)) +
+  #geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot
+  geom_point(data = summary_data_2, aes(x = CS, y = mean_value_2, group = TUS),
+             position = position_dodge(0.8), size = 3, shape = 21) +  # Mean points
+  geom_errorbar(data = summary_data_2, aes(x = CS, y = mean_value_2, ymin = mean_value_2 - sem_value_2, ymax = mean_value_2 + sem_value_2),
+                position = position_dodge(0.8), width = 0.2) +  # SEM error bars
+  labs(x = "CS Condition", y = "SCR_sqrt", fill = "TUS Condition") +
+  facet_grid(EXPERIMENT ~ TUS) +
+  theme_minimal()
+
+
+
+# scr_df <- scr_df %>%
+#   mutate(SUBID = ifelse(EXPERIMENT == "hippocampus", 
+#                         sprintf("%02d", as.numeric(SUBID) + 40),  # Add 40 and keep leading zeros
+#                         SUBID)) %>%  # Keep original SUBID if not "hippocampus"
+#   mutate(SUBID = factor(SUBID, levels = unique(SUBID)))  # Convert SUBID back to factor and preserve levels
+# 
+# df <- scr_df
+# 
+# PHASE_filter="acquisition"
+# if (PHASE_filter == "acquisition") {
+#   # Create a modified TRIAL_COUNT variable to deal with double amount of control during acquisition
+#   df$TRIAL <- ifelse(df$CS == "control", df$TRIAL / 2, df$TRIAL)
+#   # Convert TRIAL back to numeric
+#   df$TRIAL <- as.numeric(df$TRIAL)
+#   # Function to check if a number is not an integer
+#   is_not_integer <- function(x) {
+#     x != floor(x)
+#   }
+#   # Create a new column with the condition
+#   df$TRIAL <- ifelse(is_not_integer(df$TRIAL), df$TRIAL + 0.5, df$TRIAL)
+# }
+
+# Step 1: Summarize and calculate the mean_SCR_sqrt for each SUBID, TRIAL, and CS
+# scr_df <- df %>%
+#   group_by(EXPERIMENT, SUBID, PHASE, TRIAL, TUS, CS, US) %>%
+#   dplyr::summarise(
+#     SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE),
+#     .groups = 'drop'  # Avoid grouping in the resulting data frame
+#   )
+
+load("/Volumes/project/3023001.06/experiments/scr_df.RData")
+
+scr_df %>%
+  filter(SCR > 0 & SCR < 0.01) %>%  # Filter rows where SCR_sqrt is below 0.1
+  print()
+
+scr_df <- scr_df %>%
+  mutate(SCR = ifelse(SCR > 0 & SCR < 0.01, 0, SCR),  # Set SCR to 0 where it meets the condition
+         SCR_sqrt = ifelse(SCR > 0 & SCR < 0.01, 0, SCR_sqrt))  # Set SCR_sqrt to 0 for the same rows
+
+scr_df$CS <- relevel(scr_df$CS, ref = "control")
+scr_df$US <- relevel(scr_df$US, ref = "unreinforced")
+scr_df$TUS <- relevel(scr_df$TUS, ref = "active")
+
+df <- scr_df
+
+PHASE_filter="acquisition"
+
+if (PHASE_filter == "acquisition") {
+  # Create a modified TRIAL_COUNT variable to deal with double amount of control during acquisition
+  df$TRIAL <- ifelse(df$CS == "control", df$TRIAL / 2, df$TRIAL)
+  # Convert TRIAL back to numeric
+  df$TRIAL <- as.numeric(df$TRIAL)
+  # Function to check if a number is not an integer
+  is_not_integer <- function(x) {
+    x != floor(x)
+  }
+  # Create a new column with the condition
+  df$TRIAL <- ifelse(is_not_integer(df$TRIAL), df$TRIAL + 0.5, df$TRIAL)
+}
+
+# Step 1: Summarize and calculate the mean_SCR_sqrt for each SUBID, TRIAL, and CS
+scr_df <- df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TRIAL, TUS, CS, US) %>%
+  dplyr::summarise(
+    mean_SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE),
+    .groups = 'drop'  # Avoid grouping in the resulting data frame
+  )
+
+# Z-score normalize SCR_sqrt within each EXPERIMENT
+scr_df_zscore <- scr_df %>%
+  filter(PHASE == "acquisition", 
+         US == "unreinforced", 
+         TRIAL >= 3 & TRIAL <= 5) %>%
+  group_by(EXPERIMENT) %>%
+  mutate(SCR_sqrt_zscore = (mean_SCR_sqrt - mean(mean_SCR_sqrt, na.rm = TRUE)) / 
+           sd(mean_SCR_sqrt, na.rm = TRUE)) %>%
+  ungroup()
+
+# Now you can summarize as usual:
+summary_data <- scr_df_zscore %>%
+  group_by(EXPERIMENT, SUBID, CS, TUS) %>%
+  dplyr::summarise(
+    mean_value = mean(SCR_sqrt_zscore, na.rm = TRUE),
+    sem_value = sd(SCR_sqrt_zscore, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Summarize across CS and TUS
+summary_data_2 <- summary_data %>%
+  group_by(EXPERIMENT, CS, TUS) %>%
+  dplyr::summarise(
+    mean_value_2 = mean(mean_value, na.rm = TRUE),
+    sem_value_2 = sd(mean_value, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+ggplot(summary_data, aes(x = CS, y = mean_value, fill = CS, color = CS)) +
+  
+  scale_fill_manual(values = c("control" = "#66B266", "threat" = "#ab3329")) + 
+  scale_color_manual(values = c("control" = "#66B266", "threat" = "#ab3329")) + 
+  
+  # Grey semi-transparent horizontal line at 0
+  geom_hline(yintercept = 0, color = "grey50", linetype = "solid", alpha = 0.5, size = 1) +
+  
+  # Mean points with SEM error bars
+  geom_point(data = summary_data_2, 
+             aes(x = CS, y = mean_value_2, group = TUS), 
+             position = position_dodge(0.8), 
+             size = 3, shape = 21) + 
+  geom_errorbar(data = summary_data_2, 
+                aes(x = CS, y = mean_value_2, 
+                    ymin = mean_value_2 - sem_value_2, 
+                    ymax = mean_value_2 + sem_value_2), 
+                position = position_dodge(0.8), 
+                width = 0.2) +  
+  
+  # Dashed line between the means
+  geom_line(data = summary_data_2 %>% arrange(CS), 
+            aes(x = as.numeric(CS), y = mean_value_2, group = TUS), 
+            color = "black", size = 1) + 
+  
+  labs(x = "CS Condition", 
+       y = expression(bold("Z-scored SCR") * phantom(" ") * (sqrt(µS)))) +
+  
+  facet_grid(EXPERIMENT ~ TUS) +
+  
+  theme_classic() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title.x = element_text(size = 14, face = "bold", vjust = -0.5),    
+    axis.title.y = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(size = 14, vjust = 0.5),
+    axis.text.y = element_text(size = 14, hjust = 0.5),
+    #legend.position = "none",  # Remove legend
+    panel.background = element_rect(fill = rgb(1, 1, 0, alpha = 0.2), color = NA)  # Yellow background with high alpha
+  )
+
+
+
+
+library(ggplot2)
+library(dplyr)
+
+# Compute means and SEM
+summary_data <- scr_df %>%
+  filter(PHASE == "acquisition", 
+         US == "unreinforced", 
+         TRIAL >= 3 & TRIAL <= 5) %>%
+  group_by(EXPERIMENT, SUBID, CS, TUS) %>%
+  dplyr::summarise(
+    mean_value = mean(SCR_sqrt, na.rm = TRUE),
+    sem_value = sd(SCR_sqrt, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Compute group-level means and SEM
+summary_data_group <- summary_data %>%
+  group_by(EXPERIMENT, CS, TUS) %>%
+  dplyr::summarise(
+    mean_value = mean(mean_value, na.rm = TRUE),
+    sem_value = sd(mean_value, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Plot SCR_sqrt with slopes for CS, grouped by TUS × EXPERIMENT
+ggplot(summary_data, aes(x = CS, y = mean_value, color = TUS, group = TUS)) +
+  #geom_point(position = position_dodge(0.2), alpha = 0.5) +  # Individual data points
+  geom_line(data = summary_data_group, aes(x = CS, y = mean_value, group = TUS), size = 1) +  # Mean trend lines
+  geom_errorbar(data = summary_data_group, 
+                aes(ymin = mean_value - sem_value, ymax = mean_value + sem_value), 
+                width = 0.2, position = position_dodge(0.2)) +  # SEM error bars
+  facet_wrap(~ EXPERIMENT) +  # Facet by EXPERIMENT
+  labs(x = "CS Condition", y = "SCR_sqrt", color = "TUS Condition") +
+  theme_minimal()
+
+
+
+summary_data <- scr_df_adjusted %>%
+  group_by(EXPERIMENT, SUBID, CS, TUS) %>%
+  dplyr::summarise(
+    mean_value = mean(SCR_sqrt_corrected, na.rm = TRUE),  # Use adjusted SCR_sqrt
+    sem_value = sd(SCR_sqrt_corrected, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+summary_data_2 <- summary_data %>%
+  group_by(EXPERIMENT, CS, TUS) %>%
+  dplyr::summarise(
+    mean_value_2 = mean(mean_value, na.rm = TRUE),
+    sem_value_2 = sd(mean_value, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+
+
+
+
+
+# Compute means and SEM
+summary_data <- SUBID_difference %>%
+  filter(EXPERIMENT == "amygdala", 
+         PHASE == "extinction", 
+         US == "unreinforced", 
+         TRIAL >= 3 & TRIAL <= 5) %>%
+  group_by(SUBID, CS, TUS) %>%
+  dplyr::summarise(
+    mean_value = mean(mean_SCR_sqrt, na.rm = TRUE),
+    sem_value = sd(mean_SCR_sqrt, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Plot boxplots with means and SEM
+ggplot(SUBID_difference %>%
+         filter(EXPERIMENT == "amygdala", 
+                PHASE == "extinction", 
+                US == "unreinforced", 
+                TRIAL >= 3 & TRIAL <= 5), aes(x = CS, y = SCR_sqrt, fill = TUS)) +
+  #geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot
+  geom_point(data = summary_data, aes(x = CS, y = mean_value, group = TUS), 
+             position = position_dodge(0.8), size = 3, shape = 21) +  # Mean points
+  geom_errorbar(data = summary_data, aes(x = CS, y = mean_value, ymin = mean_value - sem_value, ymax = mean_value + sem_value), 
+                position = position_dodge(0.8), width = 0.2) +  # SEM error bars
+  labs(x = "CS Condition", y = "SCR_sqrt", fill = "TUS Condition") +
+  theme_minimal()
+
+
+model_amy_acq_sham_unr_CSmain <- lmer(
+  
+  mean_value ~ CS * TUS + (1 + CS + TUS | SUBID),
+  
+  data = summary_data,
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+emmeans_results <- emmeans(model_amy_acq_sham_unr_CSmain, 
+                           pairwise ~ TUS | CS, 
+                           adjust = "bonferroni",
+                           re_formula = NULL)  # Adjust p-values for multiple comparisons
+emmeans_results
+
+
+model_amy_acq_sham_unr_CSmain <- lmer(
+  
+  mean_value ~ CS * TUS + (1 + CS + TUS | SUBID),
+  
+  data = summary_data,
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+emmeans_results <- emmeans(model_amy_acq_sham_unr_CSmain, 
+                           pairwise ~ TUS | CS, 
+                           adjust = "Tukey",
+                           re_formula = NULL)  # Adjust p-values for multiple comparisons
+emmeans_results
+
+
+
+
+SUBID_difference$CS <- relevel(SUBID_difference$CS, ref = "threat")
+
+model_amy_acq_sham_unr_CSmain <- lmer(
+  
+  SCR_sqrt ~ EXPERIMENT * CS * TUS + (1 + CS * TUS | SUBID),
+  
+  data = subset(scr_df, 
+                  PHASE == "acquisition" & 
+                  US == "unreinforced" & 
+                  TRIAL >= 3 & TRIAL <= 5),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+
+emmeans_results <- emmeans(model_amy_acq_sham_unr_CSmain, 
+                           pairwise ~ EXPERIMENT * TUS | CS, 
+                           adjust = "bonferroni",
+                           re_formula = NULL)  # Adjust p-values for multiple comparisons
+emmeans_results
+
+
+library(ggplot2)
+
+# Get estimated marginal means (predicted values)
+pred_data <- as.data.frame(emmeans(model_amy_acq_sham_unr_CSmain, ~ TUS | CS, re_formula = NULL))
+
+# Plot
+ggplot(pred_data, aes(x = TUS, y = emmean, color = CS, group = CS)) +
+  geom_point(position = position_dodge(0.2), size = 3) +  # Mean points
+  geom_line(position = position_dodge(0.2), size = 1) +   # Line connecting means
+  geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.2) +  # SEM
+  labs(x = "TUS", y = "Predicted SCR_sqrt", color = "CS") +
+  theme_minimal()
+
+
+# Compute means and SEM
+summary_data <- scr_df %>%
+  filter(EXPERIMENT == "amygdala", 
+         PHASE == "acquisition", 
+         US == "unreinforced", 
+         TRIAL >= 3 & TRIAL <= 5) %>%
+  group_by(CS, TUS, TRIAL) %>%
+  dplyr::summarise(
+    mean_value = mean(SCR_sqrt, na.rm = TRUE),
+    sem_value = sd(SCR_sqrt, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+# Plot boxplots with means and SEM
+ggplot(scr_df %>%
+         filter(EXPERIMENT == "amygdala", 
+                PHASE == "acquisition", 
+                US == "unreinforced", 
+                TRIAL >= 3 & TRIAL <= 5), aes(x = CS, y = SCR_sqrt, fill = TUS)) +
+  geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot
+  geom_point(data = summary_data, aes(x = CS, y = mean_value, group = TUS), 
+             position = position_dodge(0.8), size = 3, shape = 21, fill = "white") +  # Mean points
+  geom_errorbar(data = summary_data, aes(x = CS, y = mean_value, ymin = mean_value - sem_value, ymax = mean_value + sem_value), 
+                position = position_dodge(0.8), width = 0.2) +  # SEM error bars
+  labs(x = "CS Condition", y = "SCR_sqrt", fill = "TUS Condition") +
+  facet_grid(TRIAL) +
+  theme_minimal()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+################################################################################
+
+model_amy_acq_sham_threat_USmain <- lmer(
+  
+  SCR_sqrt ~ US + (1 + US | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                PHASE == "acquisition" & 
+                TUS == "sham" & 
+                CS == "threat"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_threat_USmain)
+conf_int <- confint(model_amy_acq_sham_threat_USmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_threat_USmain)
+eta_sq <- eta_squared(model_amy_acq_sham_threat_USmain, partial = TRUE)
+
+b_US <- format(summary_model$coefficients["USreinforced", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["USreinforced", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["USreinforced", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["US", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["US", "NumDF"]
+df_den <- round(anova_model["US", "DenDF"])
+
+p_value <- anova_model["US", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_threat_USmain <- glue("\033[3mb\033[0mUS = {b_US}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_threat_USmain)
+
+################################################################################
+
+model_amy_acq_sham_USexpectancy_CSmain <- lmer(
+  
+  US_EXPECTANCY ~ CS + (1 | SUBID),
+  
+  data = subset(questionnaire_df, 
+                EXPERIMENT == "amygdala" & 
+                TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_USexpectancy_CSmain)
+conf_int <- confint(model_amy_acq_sham_USexpectancy_CSmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_USexpectancy_CSmain)
+eta_sq <- eta_squared(model_amy_acq_sham_USexpectancy_CSmain, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_USexpectancy_CSmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_USexpectancy_CSmain)
+
+################################################################################
+
+model_amy_acq_sham_CSvalence_CSmain <- lmer(
+  
+  CS_VALENCE ~ CS + (1 | SUBID),
+  
+  data = subset(questionnaire_df, 
+                EXPERIMENT == "amygdala" & 
+                  TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_CSvalence_CSmain)
+conf_int <- confint(model_amy_acq_sham_CSvalence_CSmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_CSvalence_CSmain)
+eta_sq <- eta_squared(model_amy_acq_sham_CSvalence_CSmain, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_CSvalence_CSmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_CSvalence_CSmain)
+
+################################################################################
+
+model_amy_acq_sham_CSarousal_CSmain <- lmer(
+  
+  CS_AROUSAL ~ CS + (1 | SUBID),
+  
+  data = subset(questionnaire_df, 
+                EXPERIMENT == "amygdala" & 
+                  TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_CSarousal_CSmain)
+conf_int <- confint(model_amy_acq_sham_CSarousal_CSmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_CSarousal_CSmain)
+eta_sq <- eta_squared(model_amy_acq_sham_CSarousal_CSmain, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_CSarousal_CSmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_CSarousal_CSmain)
+
+
+################################################################################
+##### TEMPORAL DYNAMICS #####
+################################################################################
+
+model_amy_acq_sham_unr_CSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                PHASE == "acquisition" & 
+                TUS == "sham" & 
+                US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_unr_CSxTRIAL)
+conf_int <- confint(model_amy_acq_sham_unr_CSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_unr_CSxTRIAL)
+eta_sq <- eta_squared(model_amy_acq_sham_unr_CSxTRIAL, partial = TRUE)
+
+b_CSxTRIAL <- sprintf("%.4f", summary_model$coefficients["CSthreat:TRIAL", "Estimate"])
+ci_lower <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 1])
+ci_upper <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 2])
+
+F_value <- sprintf("%.2f", anova_model["CS:TRIAL", "F value"])
+df_num <- anova_model["CS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TRIAL",]
+eta2_CSxTRIAL <- sprintf("%.2f", eta_CSxTRIAL$Eta2_partial)
+
+stats_model_amy_acq_sham_unr_CSxTRIAL <- glue("\033[3mb\033[0mC\033[1mS\033[0m:TRIAL = {b_CSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTRIAL}")
+
+cat(stats_model_amy_acq_sham_unr_CSxTRIAL)
+
+################################################################################
+
+model_amy_acq_sham_unr_CSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TIME + (1 + CS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "acquisition" & 
+                  TUS == "sham" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_acq_sham_unr_CSxTIME)
+
+emmeans_results <- emmeans(model_amy_acq_sham_unr_CSxTIME, 
+                           pairwise ~ CS | TIME, 
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+# Load the glue library for formatting
+library(glue)
+
+# Extract the contrast results from emmeans_results
+contrasts <- summary(emmeans_results$contrasts)
+
+# Now extract the relevant pieces of information for each time (early, mid, late)
+early_results <- contrasts[contrasts$TIME == "early", ]
+mid_results <- contrasts[contrasts$TIME == "mid", ]
+late_results <- contrasts[contrasts$TIME == "late", ]
+
+# Use sprintf to format b, SE, and t with 2 decimal places
+early_b <- sprintf("%.2f", early_results$estimate)
+early_SE <- sprintf("%.2f", early_results$SE)
+early_t <- sprintf("%.2f", early_results$t.ratio)
+early_p <- early_results$p.value
+early_df <- sprintf("%.0f", early_results$df)
+
+mid_b <- sprintf("%.2f", mid_results$estimate)
+mid_SE <- sprintf("%.2f", mid_results$SE)
+mid_t <- sprintf("%.2f", mid_results$t.ratio)
+mid_p <- mid_results$p.value
+mid_df <- sprintf("%.0f", mid_results$df)
+
+late_b <- sprintf("%.2f", late_results$estimate)
+late_SE <- sprintf("%.2f", late_results$SE)
+late_t <- sprintf("%.2f", late_results$t.ratio)
+late_p <- late_results$p.value
+late_df <- sprintf("%.0f", late_results$df)
+
+# Adjust p-values to show "< 0.0001" when below 0.0001
+early_p_formatted <- ifelse(early_p < 0.0001, "< 0.0001", sprintf("%.4f", early_p))
+mid_p_formatted <- ifelse(mid_p < 0.0001, "< 0.0001", sprintf("%.4f", mid_p))
+late_p_formatted <- ifelse(late_p < 0.0001, "< 0.0001", sprintf("%.4f", late_p))
+
+# Format them using glue
+early_text <- glue("bearly = {early_b}, SE = {early_SE}, t({early_df}) = {early_t}, p = {early_p_formatted}")
+mid_text <- glue("bmid = {mid_b}, SE = {mid_SE}, t({mid_df}) = {mid_t}, p = {mid_p_formatted}")
+late_text <- glue("blate = {late_b}, SE = {late_SE}, t({late_df}) = {late_t}, p = {late_p_formatted}")
+
+# Combine all results into one string
+final_text <- paste(early_text, mid_text, late_text, sep = "; ")
+
+# Print the formatted result
+print(final_text)
+
+################################################################################
+##### RECALL ####
+################################################################################
+
+model_amy_rec_sham_unr_CSxRECALL <- lmer(
+  
+  SCR_sqrt ~ CS * RECALL + (1 + CS + RECALL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" &
+                  !is.na(RECALL) &
+                  TUS == "sham" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_rec_sham_unr_CSxRECALL)
+conf_int <- confint(model_amy_rec_sham_unr_CSxRECALL, level = 0.95)
+anova_model <- anova(model_amy_rec_sham_unr_CSxRECALL)
+eta_sq <- eta_squared(model_amy_rec_sham_unr_CSxRECALL, partial = TRUE)
+
+b_CSxRECALL <- format(summary_model$coefficients["CSthreat:RECALLpost", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:RECALLpost", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:RECALLpost", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:RECALL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:RECALL", "NumDF"]
+df_den <- round(anova_model["CS:RECALL", "DenDF"])
+
+p_value <- anova_model["CS:RECALL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxRECALL <- eta_sq[eta_sq$Parameter == "CS:RECALL",]
+eta2_CSxRECALL <- sprintf("%.2f", eta_CSxRECALL$Eta2_partial)
+
+stats_model_amy_rec_sham_unr_CSxRECALL <- glue("\033[3mb\033[0mCS:RECALL = {b_CSxRECALL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxRECALL}")
+
+cat(stats_model_amy_rec_sham_unr_CSxRECALL)
+
+# CS main effect: 
+
+summary_model <- summary(model_amy_rec_sham_unr_CSxRECALL)
+conf_int <- confint(model_amy_rec_sham_unr_CSxRECALL, level = 0.95)
+anova_model <- anova(model_amy_rec_sham_unr_CSxRECALL)
+eta_sq <- eta_squared(model_amy_rec_sham_unr_CSxRECALL, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CS <- eta_sq[eta_sq$Parameter == "CS",]
+eta2_CS <- sprintf("%.2f", eta_CS$Eta2_partial)
+
+stats_model_amy_rec_sham_unr_CSxRECALLmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CS}")
+
+cat(stats_model_amy_rec_sham_unr_CSxRECALLmain)
+
+################################################################################
+##### EXTINCTION ####
+################################################################################
+
+################################################################################
+##### TEMPORAL DYNAMICS #####
+################################################################################
+
+model_amy_ext_sham_CSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "extinction" & 
+                  TUS == "sham" &
+                  TRIAL != "1"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_ext_sham_CSxTRIAL)
+conf_int <- confint(model_amy_ext_sham_CSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_ext_sham_CSxTRIAL)
+eta_sq <- eta_squared(model_amy_ext_sham_CSxTRIAL, partial = TRUE)
+
+b_CSxTRIAL <- sprintf("%.4f", summary_model$coefficients["CSthreat:TRIAL", "Estimate"])
+ci_lower <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 1])
+ci_upper <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 2])
+
+F_value <- sprintf("%.2f", anova_model["CS:TRIAL", "F value"])
+df_num <- anova_model["CS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TRIAL",]
+eta2_CSxTRIAL <- sprintf("%.2f", eta_CSxTRIAL$Eta2_partial)
+
+stats_model_amy_ext_sham_CSxTRIAL <- glue("\033[3mb\033[0mC\033[1mS\033[0m:TRIAL = {b_CSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTRIAL}")
+
+cat(stats_model_amy_ext_sham_CSxTRIAL)
+
+# TRIAL 1 excluded
+# bCS:TRIAL = -0.0152, 95% CI = [-0.0322, 0.0018], F(1, 66) = 3.05, p = 0.0854, ηₚ² = 0.04
+# TRIAL 1 included
+# bCS:TRIAL = -0.0147, 95% CI = [-0.0291, -0.0003], F(1, 94) = 3.97, p = 0.0492, ηₚ² = 0.04
+
+################################################################################
+
+model_amy_ext_sham_CSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TIME + (1 + CS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "extinction" & 
+                  TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_ext_sham_CSxTIME)
+
+emmeans_results <- emmeans(model_amy_ext_sham_CSxTIME, 
+                           pairwise ~ CS | TIME, 
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+# Load the glue library for formatting
+library(glue)
+
+# Extract the contrast results from emmeans_results
+contrasts <- summary(emmeans_results$contrasts)
+
+# Now extract the relevant pieces of information for each time (early, mid, late)
+early_results <- contrasts[contrasts$TIME == "early", ]
+late_results <- contrasts[contrasts$TIME == "late", ]
+
+# Use sprintf to format b, SE, and t with 2 decimal places
+early_b <- sprintf("%.2f", early_results$estimate)
+early_SE <- sprintf("%.2f", early_results$SE)
+early_t <- sprintf("%.2f", early_results$t.ratio)
+early_p <- early_results$p.value
+early_df <- sprintf("%.0f", early_results$df)
+
+late_b <- sprintf("%.2f", late_results$estimate)
+late_SE <- sprintf("%.2f", late_results$SE)
+late_t <- sprintf("%.2f", late_results$t.ratio)
+late_p <- late_results$p.value
+late_df <- sprintf("%.0f", late_results$df)
+
+# Adjust p-values to show "< 0.0001" when below 0.0001
+early_p_formatted <- ifelse(early_p < 0.0001, "< 0.0001", sprintf("%.4f", early_p))
+late_p_formatted <- ifelse(late_p < 0.0001, "< 0.0001", sprintf("%.4f", late_p))
+
+# Format them using glue
+early_text <- glue("bearly = {early_b}, SE = {early_SE}, t({early_df}) = {early_t}, p = {early_p_formatted}")
+late_text <- glue("blate = {late_b}, SE = {late_SE}, t({late_df}) = {late_t}, p = {late_p_formatted}")
+
+# Combine all results into one string
+final_text <- paste(early_text, late_text, sep = "; ")
+
+# Print the formatted result
+print(final_text)
+
+# TRIAL 1 excluded
+# bearly = 0.12, t(40) = 3.51, p = 0.0011; blate = 0.04, t(40) = 1.07, p = 0.2895
+# TRIAL 1 included
+# bearly = 0.12, t(42) = 3.77, p = 0.0005; blate = 0.04, t(42) = 1.11, p = 0.2728
+
+
+################################################################################
+##### REINST ####
+################################################################################
+
+model_amy_rec_sham_unr_CSxREINST <- lmer(
+  
+  SCR_sqrt ~ CS * REINST + (1 + CS + REINST | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" &
+                  !is.na(REINST) &
+                  TUS == "sham" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_rec_sham_unr_CSxREINST)
+conf_int <- confint(model_amy_rec_sham_unr_CSxREINST, level = 0.95)
+anova_model <- anova(model_amy_rec_sham_unr_CSxREINST)
+eta_sq <- eta_squared(model_amy_rec_sham_unr_CSxREINST, partial = TRUE)
+
+b_CSxREINST <- format(summary_model$coefficients["CSthreat:REINSTpost", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:REINSTpost", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:REINSTpost", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:REINST", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:REINST", "NumDF"]
+df_den <- round(anova_model["CS:REINST", "DenDF"])
+
+p_value <- anova_model["CS:REINST", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxREINST <- eta_sq[eta_sq$Parameter == "CS:REINST",]
+eta2_CSxREINST <- sprintf("%.2f", eta_CSxREINST$Eta2_partial)
+
+stats_model_amy_rec_sham_unr_CSxREINST <- glue("\033[3mb\033[0mCS:REINST = {b_CSxREINST}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxREINST}")
+
+cat(stats_model_amy_rec_sham_unr_CSxREINST)
+
+################################################################################
+##### EXTINCTION ####
+################################################################################
+
+################################################################################
+##### TEMPORAL DYNAMICS #####
+################################################################################
+
+model_amy_test_sham_CSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "test" & 
+                  TUS == "sham" &
+                  TRIAL != "1"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_test_sham_CSxTRIAL)
+conf_int <- confint(model_amy_test_sham_CSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_test_sham_CSxTRIAL)
+eta_sq <- eta_squared(model_amy_test_sham_CSxTRIAL, partial = TRUE)
+
+b_CSxTRIAL <- sprintf("%.4f", summary_model$coefficients["CSthreat:TRIAL", "Estimate"])
+ci_lower <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 1])
+ci_upper <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 2])
+
+F_value <- sprintf("%.2f", anova_model["CS:TRIAL", "F value"])
+df_num <- anova_model["CS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TRIAL",]
+eta2_CSxTRIAL <- sprintf("%.2f", eta_CSxTRIAL$Eta2_partial)
+
+stats_model_amy_test_sham_CSxTRIAL <- glue("\033[3mb\033[0mC\033[1mS\033[0m:TRIAL = {b_CSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTRIAL}")
+
+cat(stats_model_amy_test_sham_CSxTRIAL)
+
+# TRIAL 1 excluded
+# bCS:TRIAL = 0.0034, 95% CI = [-0.0112, 0.0181], F(1, 193) = 0.21, p = 0.6474, ηₚ² = 0.00
+# TRIAL 1 included
+# bCS:TRIAL = -0.0137, 95% CI = [-0.0282, 0.0008], F(1, 28) = 3.31, p = 0.0793, ηₚ² = 0.10
+
+################################################################################
+
+model_amy_test_sham_CSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TIME + (1 + CS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "test" & 
+                  TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_test_sham_CSxTIME)
+
+emmeans_results <- emmeans(model_amy_test_sham_CSxTIME, 
+                           pairwise ~ CS | TIME, 
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+# Load the glue library for formatting
+library(glue)
+
+# testract the contrast results from emmeans_results
+contrasts <- summary(emmeans_results$contrasts)
+
+# Now testract the relevant pieces of information for each time (early, mid, late)
+early_results <- contrasts[contrasts$TIME == "early", ]
+late_results <- contrasts[contrasts$TIME == "late", ]
+
+# Use sprintf to format b, SE, and t with 2 decimal places
+early_b <- sprintf("%.2f", early_results$estimate)
+early_SE <- sprintf("%.2f", early_results$SE)
+early_t <- sprintf("%.2f", early_results$t.ratio)
+early_p <- early_results$p.value
+early_df <- sprintf("%.0f", early_results$df)
+
+late_b <- sprintf("%.2f", late_results$estimate)
+late_SE <- sprintf("%.2f", late_results$SE)
+late_t <- sprintf("%.2f", late_results$t.ratio)
+late_p <- late_results$p.value
+late_df <- sprintf("%.0f", late_results$df)
+
+# Adjust p-values to show "< 0.0001" when below 0.0001
+early_p_formatted <- ifelse(early_p < 0.0001, "< 0.0001", sprintf("%.4f", early_p))
+late_p_formatted <- ifelse(late_p < 0.0001, "< 0.0001", sprintf("%.4f", late_p))
+
+# Format them using glue
+early_ttest <- glue("bearly = {early_b}, SE = {early_SE}, t({early_df}) = {early_t}, p = {early_p_formatted}")
+late_ttest <- glue("blate = {late_b}, SE = {late_SE}, t({late_df}) = {late_t}, p = {late_p_formatted}")
+
+# Combine all results into one string
+final_ttest <- paste(early_ttest, late_ttest, sep = "; ")
+
+# Print the formatted result
+print(final_ttest)
+
+# TRIAL 1 excluded
+# bearly = 0.01, t(45) = 0.33, p = 0.7451; blate = 0.02, t(45) = 0.78, p = 0.4415
+# TRIAL 1 included
+# bearly = 0.05, t(48) = 2.29, p = 0.0263; blate = 0.02, t(48) = 0.89, p = 0.3798
+
+

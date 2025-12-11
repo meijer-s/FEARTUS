@@ -1,0 +1,5 @@
+# Configuration file for PALM.
+# Version alpha119, running in Octave 9.2.0.
+# 20-Nov-2024 09:40:55
+
+-i /Users/sjoerdmeijer/Documents/data.csv

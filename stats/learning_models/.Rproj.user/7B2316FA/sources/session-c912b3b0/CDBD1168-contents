@@ -1,0 +1,204 @@
+##### PAIRED T-TEST #####
+
+##### DATA MATRIX #####
+
+load("/Volumes/project/3023001.06/experiments/scr_df.RData")
+
+EXPERIMENT_filter <- "amygdala"
+PHASE_filter <- "acquisition"
+US_filter <- "unreinforced"
+
+df <- scr_df %>% filter(EXPERIMENT == EXPERIMENT_filter,
+                        PHASE == PHASE_filter,
+                        US == US_filter)
+
+if (PHASE_filter == "acquisition") {
+  # Create a modified TRIAL_COUNT variable to deal with double amount of control during acquisition
+  df$TRIAL <- ifelse(df$CS == "control", df$TRIAL / 2, df$TRIAL)
+  # Convert TRIAL back to numeric
+  df$TRIAL <- as.numeric(df$TRIAL)
+  # Function to check if a number is not an integer
+  is_not_integer <- function(x) {
+    x != floor(x)
+  }
+  # Create a new column with the condition
+  df$TRIAL <- ifelse(is_not_integer(df$TRIAL), df$TRIAL + 0.5, df$TRIAL)
+}
+
+# Step 1: Summarize and calculate the mean_SCR_sqrt for each SUBID, TRIAL, and CS
+SUBID_difference <- df %>%
+  group_by(SUBID, TRIAL, TUS, CS) %>%
+  dplyr::summarise(
+    mean_SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE),
+    .groups = 'drop'  # Avoid grouping in the resulting data frame
+  )
+
+# Step 2: Separate data based on CS condition (control or threat)
+sham_safety_df <- SUBID_difference %>% filter(TUS == "sham", CS == "control")
+sham_threat_df <- SUBID_difference %>% filter(TUS == "sham", CS == "threat")
+active_safety_df <- SUBID_difference %>% filter(TUS == "active", CS == "control")
+active_threat_df <- SUBID_difference %>% filter(TUS == "active", CS == "threat")
+
+# Step 3: Reshape data so that each SUBID has rows with TRIAL as columns
+# For safety (control) condition
+sham_safety_df_wide <- sham_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS)
+
+# For threat condition
+sham_threat_df_wide <- sham_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS)
+
+# For safety (control) condition
+active_safety_df_wide <- active_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS)
+
+# For threat condition
+active_threat_df_wide <- active_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS)
+
+##### DATA #####
+
+data_wide <- rbind(sham_threat_df_wide, sham_safety_df_wide,
+                   active_threat_df_wide, active_safety_df_wide)
+
+print(data_wide, N = Inf)
+
+# Write the data to a CSV file
+write.table(data_wide, 
+            file = "/Users/sjoerdmeijer/Documents/data_CSxTUS_amygdala.csv", 
+            row.names = FALSE, 
+            col.names = FALSE,  # This will exclude column names
+            sep = ",")  # Ensure the separator is a comma
+
+##### EXCHANGABILITY BLOCKS #####
+
+# Number of subjects, trials, and conditions
+subjects <- 25
+TUS <- 50
+
+# Generate the data frame for SUBJECT, TRIAL, and CONDITION
+exchange_blocks <- expand.grid(
+  SUBJECT = rep(1:subjects, 4)          # Negative subject indices         # Positive condition indices
+)
+
+exchange_blocks$CS <- rep(c(1, 2), each = subjects)
+exchange_blocks$TUS <- rep(c(1, 2), each = TUS)
+
+# Add a top-level constant grouping column
+exchange_blocks$EXPERIMENT <- -1
+
+# Rearrange columns to ensure the top-level grouping column is first
+exchangeability_file <- exchange_blocks[, c("EXPERIMENT", "SUBJECT", "TUS", "CS")]
+
+print(exchangeability_file, N = Inf)
+
+# Write the exchangeability blocks file to a CSV
+write.table(exchangeability_file, 
+            file = "/Users/sjoerdmeijer/Documents/blocks_CSxTUS_amygdala.csv", 
+            row.names = FALSE, 
+            col.names = FALSE, 
+            sep = ",")
+
+
+##### DESIGN MATRIX #####
+
+conditions <- 4
+
+# Number of total rows (subject * trials * conditions)
+total_rows <- subjects * conditions
+total_cols <- subjects + 1 + 1 + 1 # CS, TUS, INTERACTION
+
+# Initialize an empty matrix for the design matrix
+design_matrix <- matrix(0, nrow = total_rows, ncol = total_cols)
+
+# TUS: sham
+design_matrix[1:50, 1] <- 1
+# TUS: active
+design_matrix[51:100, 1] <- -1
+
+# CS: threat
+design_matrix[1:25, 2] <- 1
+# CS: safety
+design_matrix[26:50, 2] <- -1
+# CS: threat
+design_matrix[51:75, 2] <- 1
+# CS: safety
+design_matrix[76:100, 2] <- -1
+
+# TUS sham : CS threat
+design_matrix[1:25, 3] <- 1
+# TUS sham : CS safety
+design_matrix[26:50, 3] <- -1
+# TUS active : CS threat
+design_matrix[51:75, 3] <- -1
+# TUS active : CS safety
+design_matrix[76:100, 3] <- 1
+
+# Add subject identity columns (each subject will have a column with 1 in their row and 0 elsewhere)
+for (i in 1:subjects) {
+  design_matrix[i, i + 3] <- 1  # Row 1 to 25: subject 1 to 25
+  design_matrix[25 + i, i + 3] <- 1  # Row 26 to 50: subject 1 to 25
+  design_matrix[50 + i, i + 3] <- 1  # Row 26 to 50: subject 1 to 25
+  design_matrix[75 + i, i + 3] <- 1  # Row 26 to 50: subject 1 to 25
+}
+
+# Convert to a data frame and check the structure
+design_matrix_df <- as.data.frame(design_matrix)
+print(design_matrix_df, N = Inf)
+
+
+# Write the design matrix to a CSV file
+write.table(design_matrix_df, 
+            file = "/Users/sjoerdmeijer/Documents/design_CSxTUS_amygdala.csv", 
+            row.names = FALSE, 
+            col.names = FALSE,  # This will exclude column names
+            sep = ",")  # Ensure the separator is a comma
+
+##### PALM ######
+
+# circo /Users/sjoerdmeijer/Documents/ptree_CSxTUS_amygdala.dot -Tsvg -o /Users/sjoerdmeijer/Documents/ptree_CSxTUS_amygdala.svg
+
+##### CONTRAST MATRIX #####
+
+# Initialize the contrast matrix with 0s (1 row, total_cols columns)
+contrast_matrix <- matrix(0, nrow = 3, ncol = total_cols)
+
+# Set the contrast for the first column (condition)
+contrast_matrix[1, 1] <- 1  # TUS
+contrast_matrix[2, 2] <- 1  # CS
+contrast_matrix[3, 3] <- 1  # INTERACTION
+
+# Convert to a data frame and save as a CSV file
+contrast_matrix_df <- as.data.frame(contrast_matrix)
+
+print(contrast_matrix_df, N = Inf)
+
+write.table(contrast_matrix_df, 
+            file = "/Users/sjoerdmeijer/Documents/contrast_CSxTUS_amygdala.csv", 
+            row.names = FALSE, 
+            col.names = FALSE,  # This will exclude column names
+            sep = ",")  # Ensure the separator is a comma
+
+##### PALM #####
+
+# ./palm -i /Users/sjoerdmeijer/Documents/data.csv \ -d /Users/sjoerdmeijer/Documents/design.csv \ -t /Users/sjoerdmeijer/Documents/contrast.csv \ -n 10000 \ -o /Users/sjoerdmeijer/Documents/palm_results

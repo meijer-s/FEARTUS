@@ -1,0 +1,4 @@
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/scr_df.RData")
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/cs_quest_df.RData")
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/tus_quest_df.RData")
+

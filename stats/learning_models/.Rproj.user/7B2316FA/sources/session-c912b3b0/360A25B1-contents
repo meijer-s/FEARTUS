@@ -1,0 +1,31 @@
+prep_learning_model_data <- function(scr_df) {
+  
+  N_SUB   <- as.numeric(length(unique(scr$SUBID)))
+  N_TRIAL <- as.numeric(max(scr$TRIAL))
+  Tsubj   <- rep(N_TRIAL, N_SUB)
+  
+  to_wide <- function(df, value_var) {
+    df %>%
+      arrange(SUBID, BLOCK, TRIAL) %>%
+      group_by(SUBID) %>%
+      mutate(row_id = row_number()) %>%
+      ungroup() %>%
+      select(row_id, SUBID, all_of(value_var)) %>%
+      tidyr::pivot_wider(names_from = SUBID, values_from = all_of(value_var)) %>%
+      select(-row_id)
+  }
+  
+  scr_wide <- to_wide(scr_acq, "SCR_sqrt")
+  us_wide  <- to_wide(scr_acq, "US")
+  cue_wide <- to_wide(scr_acq, "CUE")
+  
+  list(
+    N_SUB   = N_SUB,
+    N_TRIAL = N_TRIAL,
+    Tsubj   = Tsubj,
+    scr_wide = scr_wide,
+    us_wide  = us_wide,
+    cue_wide = cue_wide
+  )
+  
+}

@@ -1,0 +1,7 @@
+{
+    "installOptions": {
+        "installFromRepository": true,
+        "libraryPath": "/Users/sjoerd.meijer/Documents/amyTUS/code/learning_models/renv/library/macos/R-4.5/aarch64-apple-darwin20",
+        "installDependencies": true
+    }
+}

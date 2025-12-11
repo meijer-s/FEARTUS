@@ -1,0 +1,228 @@
+ctrl_nlopt <- lmerControl(
+  optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+  calc.derivs = FALSE,
+  optimizer = "nloptwrap",
+  check.conv.singular = "ignore"
+)
+
+# acquisition: CS * TRIAL #
+
+model <- lmer(
+  SCR_sqrt ~ CS * TUS * TRIAL * EXPERIMENT + (1 + CS + TUS + TRIAL | SUBID),
+  data = scr_df_exp_acq_CS_TUS,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["CS:TUS:TRIAL:EXPERIMENT", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:TRIAL:EXPERIMENT", "NumDF"]
+df_den <- round(anova_model["CS:TUS:TRIAL:EXPERIMENT", "DenDF"])
+p_value <- anova_model["CS:TUS:TRIAL:EXPERIMENT", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TUS:TRIAL:EXPERIMENT",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_exp_acq_CS_TUS", "\n",
+    "Model: SCR_sqrt ~ CS * TUS * TRIAL * EXPERIMENT","\n",
+    "Stats:", stats)
+
+# acquisition: CS * TIME #
+
+model <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS * EXPERIMENT + (1 + CS + TUS | SUBID),
+  data = scr_df_exp_acq_CS_TUS_early,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["CS:TUS:EXPERIMENT", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:EXPERIMENT", "NumDF"]
+df_den <- round(anova_model["CS:TUS:EXPERIMENT", "DenDF"])
+p_value <- anova_model["CS:TUS:EXPERIMENT", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TUS:EXPERIMENT",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_exp_acq_CS_TUS_early", "\n",
+    "Model: SCR_sqrt ~ CS * TUS * EXPERIMENT + (1 + CS * TUS | SUBID)","\n",
+    "Stats:", stats)
+
+# Estimated marginal means and CS × TUS contrast
+emm <- emmeans(model, ~ CS * TUS * EXPERIMENT, re_formula = NULL)
+cn  <- contrast(emm, interaction = "revpairwise")
+cn
+
+eta_squared(model, partial = TRUE)
+
+model <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS * EXPERIMENT + (1 + CS + TUS | SUBID),
+  data = scr_df_exp_acq_CS_TUS_mid,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["CS:TUS:EXPERIMENT", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:EXPERIMENT", "NumDF"]
+df_den <- round(anova_model["CS:TUS:EXPERIMENT", "DenDF"])
+p_value <- anova_model["CS:TUS:EXPERIMENT", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TUS:EXPERIMENT",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_exp_acq_CS_TUS_mid", "\n",
+    "Model: SCR_sqrt_meanTime ~ CS * TUS + (1 + CS | SUBID) + (1 + TUS | SUBID)","\n",
+    "Stats:", stats)
+
+model <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS * EXPERIMENT + (1 + CS + TUS | SUBID),
+  data = scr_df_exp_acq_CS_TUS_late,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["CS:TUS:EXPERIMENT", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:EXPERIMENT", "NumDF"]
+df_den <- round(anova_model["CS:TUS:EXPERIMENT", "DenDF"])
+p_value <- anova_model["CS:TUS:EXPERIMENT", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TUS:EXPERIMENT",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_exp_acq_CS_TUS_late", "\n",
+    "Model: SCR_sqrt ~ CS + (1 | SUBID)","\n",
+    "Stats:", stats)
+
+# extinction: CS * TIME #
+
+model <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS * EXPERIMENT + (1 + CS + TUS | SUBID),
+  data = scr_df_exp_ext_CS_TUS_early,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["CS:TUS:EXPERIMENT", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:EXPERIMENT", "NumDF"]
+df_den <- round(anova_model["CS:TUS:EXPERIMENT", "DenDF"])
+p_value <- anova_model["CS:TUS:EXPERIMENT", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TUS:EXPERIMENT",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_exp_ext_CS_early", "\n",
+    "Model: SCR_sqrt ~ CS + (1 | SUBID)","\n",
+    "Stats:", stats)
+
+# Estimated marginal means and CS × TUS contrast
+emm <- emmeans(model, ~ CS * TUS * EXPERIMENT, re_formula = NULL)
+cn  <- contrast(emm, interaction = "revpairwise")
+cn
+
+eta_squared(model, partial = TRUE)
+
+model <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS * EXPERIMENT + (1 + CS + TUS | SUBID),
+  data = scr_df_exp_ext_CS_TUS_late,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["CS:TUS:EXPERIMENT", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:EXPERIMENT", "NumDF"]
+df_den <- round(anova_model["CS:TUS:EXPERIMENT", "DenDF"])
+p_value <- anova_model["CS:TUS:EXPERIMENT", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TUS:EXPERIMENT",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_exp_ext_CS_late", "\n",
+    "Model: SCR_sqrt ~ CS + (1 | SUBID)","\n",
+    "Stats:", stats)
+
+# recovery following reinstatement #
+
+model <- lmer(
+  SCR_sqrt ~ REINST * CS * TUS * EXPERIMENT + (1 + REINST + CS + TUS | SUBID),
+  data = scr_df_exp_rei_CS_TUS,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["REINST:CS:TUS:EXPERIMENT", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["REINST:CS:TUS:EXPERIMENT", "NumDF"]
+df_den <- round(anova_model["REINST:CS:TUS:EXPERIMENT", "DenDF"])
+p_value <- anova_model["REINST:CS:TUS:EXPERIMENT", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "REINST:CS:TUS:EXPERIMENT",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_exp_ret_CS", "\n",
+    "Model: SCR_sqrt ~ REINST * CS + (1 + REINST + CS | SUBID)","\n",
+    "Stats:", stats)
+
+# re-extinction #
+
+model <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS * EXPERIMENT + (1 + CS + TUS | SUBID),
+  data = scr_df_exp_reext_CS_TUS_early,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["CS:TUS:EXPERIMENT", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:EXPERIMENT", "NumDF"]
+df_den <- round(anova_model["CS:TUS:EXPERIMENT", "DenDF"])
+p_value <- anova_model["CS:TUS:EXPERIMENT", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TUS:EXPERIMENT",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_exp_reext_CS_early", "\n",
+    "Model: SCR_sqrt ~ CS + (1 | SUBID)","\n",
+    "Stats:", stats)
+
+model <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS * EXPERIMENT + (1 + CS + TUS | SUBID),
+  data = scr_df_exp_reext_CS_TUS_late,
+  control = ctrl_nlopt
+)
+
+anova_model <- anova(model)
+F_value <- format(anova_model["CS:TUS:EXPERIMENT", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TUS:EXPERIMENT", "NumDF"]
+df_den <- round(anova_model["CS:TUS:EXPERIMENT", "DenDF"])
+p_value <- anova_model["CS:TUS:EXPERIMENT", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TUS:EXPERIMENT",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(" Data:  scr_df_exp_reext_CS_late", "\n",
+    "Model: SCR_sqrt ~ CS + (1 | SUBID)","\n",
+    "Stats:", stats)

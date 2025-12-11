@@ -1,0 +1,302 @@
+PHASE_filter <- "acquisition"
+US_filter <- "unreinforced"
+
+df <- scr_df %>% filter(PHASE == PHASE_filter,
+                        US == US_filter)
+
+if (PHASE_filter == "acquisition") {
+  # Create a modified TRIAL_COUNT variable to deal with double amount of control during acquisition
+  df$TRIAL <- ifelse(df$CS == "control", df$TRIAL / 2, df$TRIAL)
+  # Convert TRIAL back to numeric
+  df$TRIAL <- as.numeric(df$TRIAL)
+  # Function to check if a number is not an integer
+  is_not_integer <- function(x) {
+    x != floor(x)
+  }
+  # Create a new column with the condition
+  df$TRIAL <- ifelse(is_not_integer(df$TRIAL), df$TRIAL + 0.5, df$TRIAL)
+}
+
+# Step 1: Summarize and calculate the mean_SCR_sqrt for each SUBID, TRIAL, and CS
+SUBID_difference <- df %>%
+  group_by(EXPERIMENT, SUBID, TRIAL, TUS, CS) %>%
+  dplyr::summarise(
+    mean_SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE),
+    .groups = 'drop'  # Avoid grouping in the resulting data frame
+  )
+
+# Step 2: Separate data based on CS condition (control or threat)
+amygdala_sham_safety_df <- SUBID_difference %>% filter(EXPERIMENT == "amygdala", TUS == "sham", CS == "control")
+amygdala_sham_threat_df <- SUBID_difference %>% filter(EXPERIMENT == "amygdala", TUS == "sham", CS == "threat")
+amygdala_active_safety_df <- SUBID_difference %>% filter(EXPERIMENT == "amygdala", TUS == "active", CS == "control")
+amygdala_active_threat_df <- SUBID_difference %>% filter(EXPERIMENT == "amygdala", TUS == "active", CS == "threat")
+hippocampus_sham_safety_df <- SUBID_difference %>% filter(EXPERIMENT == "hippocampus", TUS == "sham", CS == "control")
+hippocampus_sham_threat_df <- SUBID_difference %>% filter(EXPERIMENT == "hippocampus", TUS == "sham", CS == "threat")
+hippocampus_active_safety_df <- SUBID_difference %>% filter(EXPERIMENT == "hippocampus", TUS == "active", CS == "control")
+hippocampus_active_threat_df <- SUBID_difference %>% filter(EXPERIMENT == "hippocampus", TUS == "active", CS == "threat")
+
+# Step 3: Reshape data so that each SUBID has rows with TRIAL as columns
+# For safety (control) condition
+amygdala_sham_safety_df_wide <- amygdala_sham_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For threat condition
+amygdala_sham_threat_df_wide <- amygdala_sham_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For safety (control) condition
+amygdala_active_safety_df_wide <- amygdala_active_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For threat condition
+amygdala_active_threat_df_wide <- amygdala_active_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For safety (control) condition
+hippocampus_sham_safety_df_wide <- hippocampus_sham_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For threat condition
+hippocampus_sham_threat_df_wide <- hippocampus_sham_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For safety (control) condition
+hippocampus_active_safety_df_wide <- hippocampus_active_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For threat condition
+hippocampus_active_threat_df_wide <- hippocampus_active_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+##### DATA #####
+
+data_wide <- rbind(amygdala_sham_threat_df_wide, amygdala_sham_safety_df_wide,
+                   amygdala_active_threat_df_wide, amygdala_active_safety_df_wide)
+
+print(data_wide, N = Inf)
+
+# Write the data to a CSV file
+write.table(data_wide, 
+            file = "/Users/sjoerd.meijer/Documents/amyTUS/code/permutation_tests/palm_files/amygdala/amy_acq_unr_CSxTUS/data_amy_acq_unr_CSxTUS.csv", 
+            row.names = FALSE, 
+            col.names = FALSE,  # This will exclude column names
+            sep = ",")  # Ensure the separator is a comma
+
+##### EXCHANGABILITY BLOCKS #####
+
+# Number of subjects
+subjects <- 25
+TUS <- 50
+
+# Generate the data frame for SUBJECT, TRIAL, and CONDITION
+exchange_blocks <- expand.grid(
+  EXPERIMENT = -1,  # Add EXPERIMENT column directly
+  SUBJECT = rep(-1:-25, 4)  # Repeats 1 to 25 two times
+)
+
+# Add the CS column
+exchange_blocks$CS <- rep(c(1, 2), each = subjects)
+exchange_blocks$TUS <- rep(c(1, 2), each = TUS)
+
+# Rearrange columns to ensure the top-level grouping column is first
+exchangeability_file <- exchange_blocks[, c("EXPERIMENT", "SUBJECT", "TUS", "CS")]
+
+print(exchangeability_file, N = Inf)
+
+# Write the exchangeability blocks file to a CSV
+write.table(exchangeability_file, 
+            file = "/Users/sjoerd.meijer/Documents/amyTUS/code/permutation_tests/palm_files/amygdala/amy_acq_unr_CSxTUS/blocks_amy_acq_unr_CSxTUS.csv", 
+            row.names = FALSE, 
+            col.names = FALSE, 
+            sep = ",")
+
+
+##### DESIGN MATRIX #####
+
+subjects <- 25
+conditions <- 4
+
+# Number of total rows (subject * trials * conditions)
+total_rows <- subjects *  conditions
+total_cols <- subjects + 1 + 1 + 1 # CS + TUS + INTERACTION
+
+# Initialize an empty matrix for the design matrix
+design_matrix <- matrix(0, nrow = total_rows, ncol = total_cols)
+
+# TUS: sham
+design_matrix[1:50, 1] <- 1
+# TUS: active
+design_matrix[51:100, 1] <- -1
+
+# CS: threat
+design_matrix[1:25, 2] <- 1
+# CS: safety
+design_matrix[26:50, 2] <- -1
+# CS: threat
+design_matrix[51:75, 2] <- 1
+# CS: safety
+design_matrix[76:100, 2] <- -1
+
+# EXP amygdala : TUS sham : CS threat
+design_matrix[1:25, 3] <- 1
+# EXP amygdala : TUS sham : CS safety
+design_matrix[26:50, 3] <- -1
+# EXP amygdala : TUS active : CS threat
+design_matrix[51:75, 3] <- -1
+# EXP amygdala : TUS active : CS safety
+design_matrix[76:100, 3] <- 1
+
+subjects <- 25
+
+# Add subject identity columns (each subject will have a column with 1 in their row and 0 elsewhere)
+for (i in 1:subjects) {
+  design_matrix[i, i + 3] <- 1
+  design_matrix[25 + i, i + 3] <- 1
+  design_matrix[50 + i, i + 3] <- 1
+  design_matrix[75 + i, i + 3] <- 1
+}
+
+# Convert to a data frame and check the structure
+design_matrix_df <- as.data.frame(design_matrix)
+print(design_matrix_df, N = Inf)
+
+
+# Write the design matrix to a CSV file
+write.table(design_matrix_df, 
+            file = "/Users/sjoerd.meijer/Documents/amyTUS/code/permutation_tests/palm_files/amygdala/amy_acq_unr_CSxTUS/design_amy_acq_unr_CSxTUS.csv", 
+            row.names = FALSE, 
+            col.names = FALSE,  # This will exclude column names
+            sep = ",")  # Ensure the separator is a comma
+
+##### CONTRAST MATRIX #####
+
+# Initialize the contrast matrix with 0s (1 row, total_cols columns)
+contrast_matrix <- matrix(0, nrow = 3, ncol = total_cols)
+
+# Set the contrast for the first column (condition)
+contrast_matrix[1, 1] <- 1  # CS
+contrast_matrix[2, 2] <- 1  # TUS
+contrast_matrix[3, 3] <- 1  # CS x TUS INTERACTION
+
+# Convert to a data frame and save as a CSV file
+contrast_matrix_df <- as.data.frame(contrast_matrix)
+
+print(contrast_matrix_df, N = Inf)
+
+write.table(contrast_matrix_df, 
+            file = "/Users/sjoerd.meijer/Documents/amyTUS/code/permutation_tests/palm_files/amygdala/amy_acq_unr_CSxTUS/contrast_amy_acq_unr_CSxTUS.csv", 
+            row.names = FALSE, 
+            col.names = FALSE,  # This will exclude column names
+            sep = ",")  # Ensure the separator is a comma
+
+##### PALM #####
+
+/Applications/palm-alpha119/palm \
+-i /Users/sjoerd.meijer/Documents/amyTUS/code/permutation_tests/palm_files/amygdala/amy_acq_unr_CSxTUS/data_amy_acq_unr_CSxTUS.csv \
+-d /Users/sjoerd.meijer/Documents/amyTUS/code/permutation_tests/palm_files/amygdala/amy_acq_unr_CSxTUS/design_amy_acq_unr_CSxTUS.csv \
+-t /Users/sjoerd.meijer/Documents/amyTUS/code/permutation_tests/palm_files/amygdala/amy_acq_unr_CSxTUS/contrast_amy_acq_unr_CSxTUS.csv \
+-eb /Users/sjoerd.meijer/Documents/amyTUS/code/permutation_tests/palm_files/amygdala/amy_acq_unr_CSxTUS/blocks_amy_acq_unr_CSxTUS.csv \
+-Cstat mass \
+-C 1.28 \
+-T \
+-tfce1D \
+-tableasvolume \
+-o /Users/sjoerd.meijer/Documents/amyTUS/code/permutation_tests/palm_results/amygdala/amy_acq_unr_CSxTUS/PALM_amy_acq_unr_CSxTUS
+
+
+##### MEAN CLUSTER EFFECT SIZE #####
+
+# t-values for each trial in the cluster (trials 3:15)
+t_values <- c(1.7362,	2.9856,	1.3744)
+
+# Number of participants (sample size)
+n <- 25
+
+# Calculate Cohen's d for each trial using the formula t / sqrt(n)
+cohens_d_trials <- t_values / sqrt(n)
+
+# Now calculate the average Cohen's d for the cluster (mean d across all trials)
+mean_cohens_d <- mean(cohens_d_trials)
+
+# Print the results
+mean_cohens_d
+
+#### POOLED COHEN'S D ####
+
+# Step 1: Filter the data for amygdala, sham TUS, and TRIAL between 3 and 15
+filtered_data <- SUBID_difference %>%
+  filter(EXPERIMENT == "amygdala", 
+         TUS == "sham", 
+         TRIAL >= 3 & TRIAL <= 15)
+
+# Step 2: Compute the mean and standard deviation of mean_SCR_sqrt for threat and safety conditions
+# Assuming 'CS' contains the 'threat' and 'safety' conditions
+mean_std_values <- filtered_data %>%
+  group_by(TRIAL, CS) %>%
+  dplyr::summarise(mean_value = mean(mean_SCR_sqrt, na.rm = TRUE),
+            std_value = sd(mean_SCR_sqrt, na.rm = TRUE),
+            n = n(),
+            .groups = 'drop')
+
+# Step 3: Pivot the data to have 'threat' and 'safety' columns for both mean and std
+mean_std_values_wide <- mean_std_values %>%
+  pivot_wider(names_from = CS, 
+              values_from = c(mean_value, std_value), 
+              names_glue = "{CS}_{.value}")
+
+# Step 4: Calculate Cohen's d for each trial
+mean_std_values_wide <- mean_std_values_wide %>%
+  mutate(
+    # Assuming 'n' is the same for both 'threat' and 'control', so we can just use 'n'
+    pooled_sd = sqrt(((n - 1) * control_std_value^2 + (n - 1) * threat_std_value^2) / (2 * n - 2)),
+    cohensd = abs(control_mean_value - threat_mean_value) / pooled_sd
+  )
+
+# Display the updated results
+print(mean_std_values_wide)
+
+# Compute the mean Cohen's d
+mean_cohensd <- mean(mean_std_values_wide$cohensd, na.rm = TRUE)
+
+# Print the result
+print(mean_cohensd)

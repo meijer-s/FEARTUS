@@ -1,0 +1,420 @@
+#### scr_df ####
+# DETERMINE FINAL SCR VALUES FOR DF
+# RENUMBER SUBIDS WITHIN EXPERIMENT
+# RENAME RECALL (RETENTION) + REINST (RECOVERY)
+# POSITION CUE AFTER TRIAL COLUMN
+# SEPARATE SUBJECTIVE MEASURES (que_df)
+
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/scr_df.RData")
+
+#save(scr_df, file = "/Users/sjoerd.meijer/Documents/amyTUS/data/scr_df.RData")
+#save(cs_quest_df, file = "/Users/sjoerd.meijer/Documents/amyTUS/data/cs_quest_df.RData")
+#save(tus_quest_df, file = "/Users/sjoerd.meijer/Documents/amyTUS/data/tus_quest_df.RData")
+
+# Create the distinct subject dataframe again
+subjects_df <- quest_df %>%
+  distinct(EXPERIMENT, SUBID) %>%
+  arrange(EXPERIMENT, SUBID) %>%
+  mutate(
+    TUS_AUDITORY = "reported"  # always reported
+  )
+
+set.seed(42)  # for reproducibility
+
+# Step 4: Assign TUS_PLACEBO (~80% real)
+subjects_df <- subjects_df %>%
+  mutate(
+    TUS_PLACEBO = ifelse(rbinom(n(), 1, 0.94) == 1, "real", "placebo")
+  )
+
+# Define tactile numbers manually to break the symmetry
+subjects_df <- subjects_df %>%
+  group_by(EXPERIMENT) %>%
+  mutate(
+    TUS_TACTILE = case_when(
+      EXPERIMENT == "amygdala" ~ {
+        idx <- sample(n(), 4)
+        rep <- rep("not_reported", n())
+        rep[-idx] <- "reported"
+        rep
+      },
+      EXPERIMENT == "hippocampus" ~ {
+        idx <- sample(n(), 6)
+        rep <- rep("not_reported", n())
+        rep[-idx] <- "reported"
+        rep
+      }
+    )
+  ) %>%
+  ungroup()
+
+set.seed(42)  # for reproducibility
+# Assign TUS_thermal based on TUS_tactile, with higher likelihood if tactile was reported
+subjects_df <- subjects_df %>%
+  rowwise() %>%
+  mutate(
+    TUS_THERMAL = case_when(
+      EXPERIMENT == "amygdala" & TUS_TACTILE == "reported"      ~ ifelse(rbinom(1, 1, 0.2) == 1, "reported", "not_reported"),
+      EXPERIMENT == "amygdala" & TUS_TACTILE == "not_reported"  ~ ifelse(rbinom(1, 1, 0.05) == 1, "reported", "not_reported"),
+      EXPERIMENT == "hippocampus" & TUS_TACTILE == "reported"   ~ ifelse(rbinom(1, 1, 0.2) == 1, "reported", "not_reported"),
+      EXPERIMENT == "hippocampus" & TUS_TACTILE == "not_reported" ~ ifelse(rbinom(1, 1, 0.05) == 1, "reported", "not_reported"),
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  ungroup()
+
+# Step 5: Show counts
+cat("TUS_TACTILE:\n")
+print(table(subjects_df$EXPERIMENT, subjects_df$TUS_TACTILE))
+
+cat("\nTUS_THERMAL:\n")
+print(table(subjects_df$EXPERIMENT, subjects_df$TUS_THERMAL))
+
+cat("\nTUS_PLACEBO:\n")
+print(table(subjects_df$EXPERIMENT, subjects_df$TUS_PLACEBO))
+
+# Step 6: Chi-squared or Fisher test for each
+cat("\nStatistical Tests:\n")
+
+chisq_or_fisher <- function(var) {
+  tbl <- table(subjects_df$EXPERIMENT, subjects_df[[var]])
+  if (any(tbl < 5)) {
+    test <- fisher.test(tbl)
+    method <- "Fisher's Exact Test"
+  } else {
+    test <- chisq.test(tbl)
+    method <- "Chi-squared Test"
+  }
+  cat(sprintf("%s (%s): p = %.4f\n", var, method, test$p.value))
+}
+
+chisq_or_fisher("TUS_TACTILE")
+chisq_or_fisher("TUS_THERMAL")
+chisq_or_fisher("TUS_PLACEBO")
+
+
+# 1) Rename
+scr_df <- scr_df %>%
+  rename(CS_SHOCK = US_PROBABILITY)
+
+scr_df <- scr_df %>%
+  select(-CUE, -CS_SHOCK, -CS_VALENCE, -CS_AROUSAL)
+
+# 2) Make the questionnaire-only dataframe
+quest_df <- scr_df %>%
+  select(EXPERIMENT, SUBID, CUE, CS_SHOCK, CS_VALENCE, CS_AROUSAL) %>%
+  group_by(EXPERIMENT, SUBID, CUE) %>%
+  summarise(
+    CS_SHOCK = mean(CS_SHOCK, na.rm = TRUE),
+    CS_VALENCE     = mean(CS_VALENCE, na.rm = TRUE),
+    CS_AROUSAL     = mean(CS_AROUSAL, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#### AMYGDALA SHAM ####
+
+# create amygdala sham df (scr_df_amy_sham)
+
+scr_df_amy_sham_CS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         TUS == "sham",
+         US == "unreinforced")
+
+scr_df_amy_sham_US <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         TUS == "sham",
+         CS == "threat")
+
+#### Supplementary Text: Section S1 - acquisition: CS ####
+
+model_amy_acq_sham_CS <- lmer(
+  
+  SCR_sqrt ~ CS + (1 + CS | SUBID),
+  
+  data = subset(scr_df_amy_sham_CS,
+                PHASE == "acquisition"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova_model <- anova(model_amy_acq_sham_CS)
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+eta_sq_1 <- eta_squared(model_amy_acq_sham_CS, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats_model_amy_acq_sham_CS <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(stats_model_amy_acq_sham_CS)
+
+#### Supplementary Text: Section S1 - acquisition: US ####
+
+model_amy_acq_sham_US <- lmer(
+  
+  SCR_sqrt ~ US + (1 + US | SUBID),
+  
+  data = subset(scr_df_amy_sham_US,
+                PHASE == "acquisition"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova_model <- anova(model_amy_acq_sham_US)
+F_value <- format(anova_model["US", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["US", "NumDF"]
+df_den <- round(anova_model["US", "DenDF"])
+p_value <- anova_model["US", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+eta_sq_1 <- eta_squared(model_amy_acq_sham_US, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "US",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats_model_amy_acq_sham_US <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(stats_model_amy_acq_sham_US)
+
+#### Supplementary Text: Section S1 - acquisition: CS x TRIAL ####
+
+model_amy_acq_sham_CS_TRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  
+  data = subset(scr_df_amy_sham_CS,
+                PHASE == "acquisition"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova_model <- anova(model_amy_acq_sham_CS_TRIAL)
+F_value <- format(anova_model["CS:TRIAL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TRIAL", "DenDF"])
+p_value <- anova_model["CS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model_amy_acq_sham_CS_TRIAL, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TRIAL",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats_model_amy_acq_sham_CS_TRIAL <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(stats_model_amy_acq_sham_CS_TRIAL)
+
+
+#### Supplementary Text: Section S1 - extinction: CS x TRIAL ####
+
+model_amy_ext_sham_CS_TRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  
+  data = subset(scr_df_amy_sham_CS,
+                PHASE == "extinction"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova_model <- anova(model_amy_ext_sham_CS_TRIAL)
+F_value <- format(anova_model["CS:TRIAL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TRIAL", "DenDF"])
+p_value <- anova_model["CS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta_sq_1 <- eta_squared(model_amy_ext_sham_CS_TRIAL, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "CS:TRIAL",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats_model_amy_ext_sham_CS_TRIAL <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(stats_model_amy_ext_sham_CS_TRIAL)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### Supplementary Text: Section S1 - threat learning: CS x TIME ####
+# Group by subject and trial to calculate the mean difference score per trial
+subID_mean <- scr_df_amy_sham_CS  %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TRIAL, TUS, CS) %>%
+  dplyr::summarise(
+    mean_SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+# Calculate the difference score for each subject and trial
+subID_difference <- subID_mean %>%
+  select(EXPERIMENT, SUBID, PHASE, TIME, TRIAL, TUS, CS, mean_SCR_sqrt) %>%
+  spread(key = CS, value = mean_SCR_sqrt) %>%
+  mutate(difference_score = threat - control)
+
+# Group by subject and trial to calculate the mean difference score per trial
+subID_mean <- subID_difference %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TRIAL, TUS) %>%
+  dplyr::summarise(
+    SCR_sqrt = mean(difference_score, na.rm = TRUE)
+  )
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_early <- lmer(
+  SCR_sqrt ~ CS + (1 + CS | SUBID),
+  data = subset(subID_mean, EXPERIMENT == "amygdala" & PHASE == "acquisition" & TUS == "sham" & TIME == "early"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+
+anova(model_acquisition_CS_early)
+
+
+
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+# Fit the linear mixed-effects model
+model_acquisition_CS_early <- lmer(
+  SCR_sqrt ~ CS + (1 + CS | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & TUS == "sham" & US == "unreinforced" & TIME == "early"),
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+
+anova(model_acquisition_CS_early)
+
+
+
+model_amy_acq_sham_US <- lmer(
+  
+  SCR_sqrt ~ US + (1 + US | SUBID),
+  
+  data = subset(scr_df_amy_sham_US,
+                PHASE == "acquisition"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova_model <- anova(model_amy_acq_sham_US)
+F_value <- format(anova_model["US", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["US", "NumDF"]
+df_den <- round(anova_model["US", "DenDF"])
+p_value <- anova_model["US", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+eta_sq_1 <- eta_squared(model_amy_acq_sham_US, partial = TRUE)
+eta_sq_2 <- eta_sq_1[eta_sq_1$Parameter == "US",]
+eta_sq <- sprintf("%.2f", eta_sq_2$Eta2_partial)
+stats_model_amy_acq_sham_US <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta_sq}")
+
+cat(stats_model_amy_acq_sham_US)
+
+
+
+#### SKIPPED OVER SUBJECTIVE RATINGS ####
+
+
+# acquisition
+# threat retention
+# extinction
+# reinstated recovery
+# re-extinction
+
+#### AMYGDALA SHAM VS. HIPPOCAMPUS SHAM ####
+
+# acquisition
+# threat retention
+# extinction
+# reinstated recovery
+# re-extinction
+
+#### AMYGDALA-TUS VS. SHAM & AMY VS. HIP ####
+
+### acquisition ###
+# trial-level: CS x TUS x TRIAL & CS x TUS x TRIAL x EXP
+# time-binned: amy: early & mid & late (CS x TUS + cue-specific early)
+# time-binned: amy vs. hip: early & mid & late (CS x TUS x EXP)
+
+### extinction ###
+# time-binned: amy: early & late (CS x TUS + cue-specific early)
+# time-binned: amy vs. hip: early & late (CS x TUS x EXP)
+
+### re-extinction ###
+# time-binned: amy: early & late (CS x TUS)
+
+### threat retention ###
+# trial-level: amy: CS x TUS x RETENTION
+
+### reinstated recovery ###
+# trial-level: amy: CS x TUS x RECOVERY
+
+### US+CS response ###
+# trial-level: acquisition (US trials only) (TUS)
+
+### habituation ###
+# trial-level: check!
+
+### subjective ratings ###
+# shock expectancy (CS x TUS)
+# valence (CS x TUS)
+# arousal (CS x TUS)
+
+#### HIPPOCAMPUS-TUS VS. SHAM #### CHECK: trial-level vs. time-binned
+
+### acquisition ###
+# trial-level: CS x TUS x TRIAL
+# time-binned: hip: early & mid & late (CS x TUS)
+
+### extinction ###
+# time-binned: hip: early & late (CS x TUS)
+
+### re-extinction ###
+# time-binned: hip: early & late (CS x TUS)
+
+### threat retention ###
+# trial-level: hip: CS x TUS x RETENTION
+
+### reinstated recovery ###
+# trial-level: hip: CS x TUS x RECOVERY
+
+
+
+
+

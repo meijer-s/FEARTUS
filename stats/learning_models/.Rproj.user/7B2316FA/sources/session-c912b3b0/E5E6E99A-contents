@@ -1,0 +1,347 @@
+PHASE_filter <- "extinction"
+US_filter <- "unreinforced"
+
+df <- scr_df %>% filter(PHASE == PHASE_filter,
+                        US == US_filter)
+
+# Step 1: Summarize and calculate the mean_SCR_sqrt for each SUBID, TRIAL, and CS
+SUBID_difference <- df %>%
+  group_by(EXPERIMENT, SUBID, TRIAL, TUS, CS) %>%
+  dplyr::summarise(
+    mean_SCR_sqrt = mean(SCR_sqrt, na.rm = TRUE),
+    .groups = 'drop'  # Avoid grouping in the resulting data frame
+  )
+
+# Step 2: Separate data based on CS condition (control or threat)
+amygdala_sham_safety_df <- SUBID_difference %>% filter(EXPERIMENT == "amygdala", TUS == "sham", CS == "control")
+amygdala_sham_threat_df <- SUBID_difference %>% filter(EXPERIMENT == "amygdala", TUS == "sham", CS == "threat")
+amygdala_active_safety_df <- SUBID_difference %>% filter(EXPERIMENT == "amygdala", TUS == "active", CS == "control")
+amygdala_active_threat_df <- SUBID_difference %>% filter(EXPERIMENT == "amygdala", TUS == "active", CS == "threat")
+hippocampus_sham_safety_df <- SUBID_difference %>% filter(EXPERIMENT == "hippocampus", TUS == "sham", CS == "control")
+hippocampus_sham_threat_df <- SUBID_difference %>% filter(EXPERIMENT == "hippocampus", TUS == "sham", CS == "threat")
+hippocampus_active_safety_df <- SUBID_difference %>% filter(EXPERIMENT == "hippocampus", TUS == "active", CS == "control")
+hippocampus_active_threat_df <- SUBID_difference %>% filter(EXPERIMENT == "hippocampus", TUS == "active", CS == "threat")
+
+# Step 3: Reshape data so that each SUBID has rows with TRIAL as columns
+# For safety (control) condition
+amygdala_sham_safety_df_wide <- amygdala_sham_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For threat condition
+amygdala_sham_threat_df_wide <- amygdala_sham_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For safety (control) condition
+amygdala_active_safety_df_wide <- amygdala_active_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For threat condition
+amygdala_active_threat_df_wide <- amygdala_active_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For safety (control) condition
+hippocampus_sham_safety_df_wide <- hippocampus_sham_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For threat condition
+hippocampus_sham_threat_df_wide <- hippocampus_sham_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For safety (control) condition
+hippocampus_active_safety_df_wide <- hippocampus_active_safety_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+# For threat condition
+hippocampus_active_threat_df_wide <- hippocampus_active_threat_df %>%
+  pivot_wider(
+    names_from = TRIAL,        # The columns will be the trial numbers
+    values_from = mean_SCR_sqrt,  # Values in these columns are the mean_SCR_sqrt
+    names_prefix = "TRIAL_"   # Prefix to indicate the trials
+  ) %>% 
+  select(-SUBID, -CS, -TUS, -EXPERIMENT)
+
+##### DATA #####
+
+data_wide <- rbind(amygdala_sham_threat_df_wide, amygdala_sham_safety_df_wide,
+                   amygdala_active_threat_df_wide, amygdala_active_safety_df_wide,
+                   hippocampus_sham_threat_df_wide, hippocampus_sham_safety_df_wide,
+                   hippocampus_active_threat_df_wide, hippocampus_active_safety_df_wide)
+
+print(data_wide, N = Inf)
+
+# Write the data to a CSV file
+write.table(data_wide, 
+            file = "/Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/data_ext_unr_CSxTUSxEXP.csv", 
+            row.names = FALSE, 
+            col.names = FALSE,  # This will exclude column names
+            sep = ",")  # Ensure the separator is a comma
+
+##### EXCHANGABILITY BLOCKS #####
+
+# Number of subjects, trials, and conditions
+subjects <- 25
+TUS <- 50
+EXPERIMENT <- 100
+
+EXP1_SUB <- rep(1:25, 4)    # Repeats 1 to 25 four times
+EXP2_SUB <- rep(26:50, 4)   # Repeats 26 to 50 four times
+
+# Generate the data frame for SUBJECT, TRIAL, and CONDITION
+exchange_blocks <- expand.grid(
+  SUBJECT = c(EXP1_SUB, EXP2_SUB)
+)
+
+exchange_blocks$CS <- rep(c(1, 2), each = subjects)
+exchange_blocks$TUS <- rep(c(1, 2), each = TUS)
+
+# Add a top-level constant grouping column
+exchange_blocks$EXPERIMENT <- rep(c(-1, -2), each = EXPERIMENT)
+exchange_blocks$COMPLETE <- rep(c(-1), each = 200)
+
+# Rearrange columns to ensure the top-level grouping column is first
+exchangeability_file <- exchange_blocks[, c("COMPLETE", "EXPERIMENT", "SUBJECT", "TUS", "CS")]
+
+print(exchangeability_file, N = Inf)
+
+# Write the exchangeability blocks file to a CSV
+write.table(exchangeability_file, 
+            file = "/Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/blocks_ext_unr_CSxTUSxEXP.csv", 
+            row.names = FALSE, 
+            col.names = FALSE, 
+            sep = ",")
+
+
+##### DESIGN MATRIX #####
+
+conditions <- 4
+experiments <- 2
+
+# Number of total rows (subject * trials * conditions)
+total_rows <- subjects *  conditions
+total_cols <- subjects * experiments + 1 + 1 + 1 # CS, TUS, INTERACTION /W EXP
+
+# Initialize an empty matrix for the design matrix
+design_matrix <- matrix(0, nrow = total_rows, ncol = total_cols)
+
+design_matrix <- rbind(design_matrix, design_matrix)
+
+# RANK DEFICIENCY IF USED WITH RANDOM EFFECTS SUBJECTS
+# MAIN EFFECT OF EXPERIMENT SHOULD BE TESTED IN SEPARATE ANALYSIS
+# https://fsl.fmrib.ox.ac.uk/fsl/docs/#/statistics/glm?id=anova-2-groups-2-levels-per-subject-2-way-mixed-effect-anova
+
+# # EXPERIMENT: amygdala
+# design_matrix[1:100, 1] <- -1
+# # EXPERIMENT: hippocampus
+# design_matrix[101:200, 1] <- 1
+
+# TUS: sham
+design_matrix[1:50, 1] <- 1
+# TUS: active
+design_matrix[51:100, 1] <- -1
+
+# TUS: sham
+design_matrix[101:150, 1] <- 1
+# TUS: active
+design_matrix[151:200, 1] <- -1
+
+# CS: threat
+design_matrix[1:25, 2] <- 1
+# CS: safety
+design_matrix[26:50, 2] <- -1
+# CS: threat
+design_matrix[51:75, 2] <- 1
+# CS: safety
+design_matrix[76:100, 2] <- -1
+
+# CS: threat
+design_matrix[101:125, 2] <- 1
+# CS: safety
+design_matrix[126:150, 2] <- -1
+# CS: threat
+design_matrix[151:175, 2] <- 1
+# CS: safety
+design_matrix[176:200, 2] <- -1
+
+# EXP amygdala : TUS sham : CS threat
+design_matrix[1:25, 3] <- 1 # multiply EXP by CS by TUS condition
+# EXP amygdala : TUS sham : CS safety
+design_matrix[26:50, 3] <- -1
+# EXP amygdala : TUS active : CS threat
+design_matrix[51:75, 3] <- -1
+# EXP amygdala : TUS active : CS safety
+design_matrix[76:100, 3] <- 1
+
+# EXP hippocampus : TUS sham : CS threat
+design_matrix[101:125, 3] <- -1 # multiply EXP by CS by TUS condition
+# EXP hippocampus : TUS sham : CS safety
+design_matrix[126:150, 3] <- 1
+# EXP hippocampus : TUS active : CS threat
+design_matrix[151:175, 3] <- 1
+# EXP hippocampus : TUS active : CS safety
+design_matrix[176:200, 3] <- -1
+
+subjects <- 25
+
+# Add subject identity columns (each subject will have a column with 1 in their row and 0 elsewhere)
+for (i in 1:subjects) {
+  design_matrix[i, i + 3] <- 1  # Row 1 to 25: subject 1 to 25
+  design_matrix[25 + i, i + 3] <- 1  # Row 26 to 50: subject 1 to 25
+  design_matrix[50 + i, i + 3] <- 1  # Row 26 to 50: subject 1 to 25
+  design_matrix[75 + i, i + 3] <- 1  # Row 26 to 50: subject 1 to 25
+  design_matrix[i + 100, i + 3 + 25] <- 1  # Row 1 to 25: subject 1 to 25
+  design_matrix[25 + 100 + i, i + 3 + 25] <- 1  # Row 26 to 50: subject 1 to 25
+  design_matrix[50 + 100 + i, i + 3 + 25] <- 1  # Row 26 to 50: subject 1 to 25
+  design_matrix[75 + 100 + i, i + 3 + 25] <- 1  # Row 26 to 50: subject 1 to 25
+}
+
+# Convert to a data frame and check the structure
+design_matrix_df <- as.data.frame(design_matrix)
+print(design_matrix_df, N = Inf)
+
+# Write the design matrix to a CSV file
+write.table(design_matrix_df, 
+            file = "/Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/design_ext_unr_CSxTUSxEXP.csv", 
+            row.names = FALSE, 
+            col.names = FALSE,  # This will exclude column names
+            sep = ",")  # Ensure the separator is a comma
+
+##### UPDATE !!! PALM: MATLAB ######
+
+# MATLAB
+# addpath('/Applications/palm-alpha119')
+# EB = csvread('/Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/blocks_ext_unr_CSxTUSxEXP.csv');
+# M = csvread('/Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/design_ext_unr_CSxTUSxEXP.csv');
+# EB = palm_reindex(EB,'fixleaves');
+# Ptree = palm_tree(EB,M);
+# palm_ptree2dot(Ptree,'/Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/exchangeability_ext_unr_CSxTUSxEXP.dot');
+
+# PALM
+# circo /Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/exchangeability_ext_unr_CSxTUSxEXP.dot -Tsvg -o /Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/ptree_ext_unr_CSxTUSxEXP.svg
+
+##### CONTRAST MATRIX #####
+
+# Initialize the contrast matrix with 0s (1 row, total_cols columns)
+contrast_matrix <- matrix(0, nrow = 3, ncol = total_cols)
+
+# Set the contrast for the first column (condition)
+contrast_matrix[1, 1] <- 1  # CS
+contrast_matrix[2, 2] <- 1  # TUS
+contrast_matrix[3, 3] <- 1  # CS x TUS INTERACTION
+
+# Convert to a data frame and save as a CSV file
+contrast_matrix_df <- as.data.frame(contrast_matrix)
+
+print(contrast_matrix_df, N = Inf)
+
+write.table(contrast_matrix_df, 
+            file = "/Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/contrast_ext_unr_CSxTUSxEXP.csv", 
+            row.names = FALSE, 
+            col.names = FALSE,  # This will exclude column names
+            sep = ",")  # Ensure the separator is a comma
+
+##### PALM #####
+
+/Applications/palm-alpha119/palm \
+-i /Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/data_ext_unr_CSxTUSxEXP.csv \
+-d /Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/design_ext_unr_CSxTUSxEXP.csv \
+-t /Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/contrast_ext_unr_CSxTUSxEXP.csv \
+-eb /Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_files/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/blocks_ext_unr_CSxTUSxEXP.csv \
+-Cstat mass \
+-C 1.28 \
+-T \
+-tfce1D \
+-tableasvolume \
+-o /Volumes/project/3023001.06/experiments/code/code_2025/cluster/palm_results/amygdala_vs_hippocampus/ext_unr_CSxTUSxEXP/PALM_ext_unr_CSxTUSxEXP
+
+
+##### MEAN CLUSTER EFFECT SIZE #####
+
+# t-values for each trial in the cluster (trials 3:15)
+t_values <- c(1.7362,	2.9856,	1.3744)
+
+# Number of participants (sample size)
+n <- 25
+
+# Calculate Cohen's d for each trial using the formula t / sqrt(n)
+cohens_d_trials <- t_values / sqrt(n)
+
+# Now calculate the average Cohen's d for the cluster (mean d across all trials)
+mean_cohens_d <- mean(cohens_d_trials)
+
+# Print the results
+mean_cohens_d
+
+#### POOLED COHEN'S D ####
+
+# Step 1: Filter the data for amygdala, sham TUS, and TRIAL between 3 and 15
+filtered_data <- SUBID_difference %>%
+  filter(EXPERIMENT == "amygdala", 
+         TUS == "sham", 
+         TRIAL >= 3 & TRIAL <= 15)
+
+# Step 2: Compute the mean and standard deviation of mean_SCR_sqrt for threat and safety conditions
+# Assuming 'CS' contains the 'threat' and 'safety' conditions
+mean_std_values <- filtered_data %>%
+  group_by(TRIAL, CS) %>%
+  dplyr::summarise(mean_value = mean(mean_SCR_sqrt, na.rm = TRUE),
+            std_value = sd(mean_SCR_sqrt, na.rm = TRUE),
+            n = n(),
+            .groups = 'drop')
+
+# Step 3: Pivot the data to have 'threat' and 'safety' columns for both mean and std
+mean_std_values_wide <- mean_std_values %>%
+  pivot_wider(names_from = CS, 
+              values_from = c(mean_value, std_value), 
+              names_glue = "{CS}_{.value}")
+
+# Step 4: Calculate Cohen's d for each trial
+mean_std_values_wide <- mean_std_values_wide %>%
+  mutate(
+    # Assuming 'n' is the same for both 'threat' and 'control', so we can just use 'n'
+    pooled_sd = sqrt(((n - 1) * control_std_value^2 + (n - 1) * threat_std_value^2) / (2 * n - 2)),
+    cohensd = abs(control_mean_value - threat_mean_value) / pooled_sd
+  )
+
+# Display the updated results
+print(mean_std_values_wide)
+
+# Compute the mean Cohen's d
+mean_cohensd <- mean(mean_std_values_wide$cohensd, na.rm = TRUE)
+
+# Print the result
+print(mean_cohensd)

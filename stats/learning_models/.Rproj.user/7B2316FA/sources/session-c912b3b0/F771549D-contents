@@ -1,0 +1,726 @@
+#### LOAD LIBRARIES ####
+library(magrittr)
+library(dplyr)
+library(tidyr)
+library(lme4)
+library(lmerTest)
+library(effectsize)
+library(emmeans)
+library(cmdstanr)
+set_cmdstan_path(path = '/Users/sjoerdmeijer/.cmdstan/cmdstan-2.34.1')
+library(rstan)
+library(brms)
+library(bayestestR)
+library(see)
+
+#### LOAD DATAFRAME ####
+load("/Volumes/project/3023001.06/experiments/scr_df.RData")
+
+scr_df %>%
+  filter(SCR > 0 & SCR < 0.01) %>%  # Filter rows where SCR_sqrt is below 0.1
+  print()
+
+scr_df <- scr_df %>%
+  mutate(SCR = ifelse(SCR > 0 & SCR < 0.01, 0, SCR),  # Set SCR to 0 where it meets the condition
+         SCR_sqrt = ifelse(SCR > 0 & SCR < 0.01, 0, SCR_sqrt))  # Set SCR_sqrt to 0 for the same rows
+
+scr_df$CS <- relevel(scr_df$CS, ref = "control")
+scr_df$US <- relevel(scr_df$US, ref = "unreinforced")
+
+# Select relevant columns and compute means
+questionnaire_df <- scr_df %>%
+  select(EXPERIMENT, SUBID, TUS, CS, CUE, US_EXPECTANCY, CS_VALENCE, CS_AROUSAL) %>%
+  mutate(CS_VALENCE = 8 - CS_VALENCE) %>%  # Flip CS_VALENCE values
+  group_by(EXPERIMENT, SUBID, TUS, CS, CUE) %>%
+  dplyr::summarise(
+    US_EXPECTANCY = mean(US_EXPECTANCY, na.rm = TRUE),
+    CS_VALENCE = mean(CS_VALENCE, na.rm = TRUE),
+    CS_AROUSAL = mean(CS_AROUSAL, na.rm = TRUE),
+    .groups = 'drop'  # Avoid nested grouping in the result
+  )
+
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+
+#### AMYGDALA EXPERIMENT - SHAM CONDITION ####
+
+################################################################################
+##### ACQUISITION ####
+################################################################################
+
+model_amy_acq_sham_unr_CSmain <- lmer(
+  
+  SCR_sqrt ~ CS + (1 + CS | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                PHASE == "acquisition" & 
+                TUS == "sham" & 
+                US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_unr_CSmain)
+conf_int <- confint(model_amy_acq_sham_unr_CSmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_unr_CSmain)
+eta_sq <- eta_squared(model_amy_acq_sham_unr_CSmain, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_unr_CSmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_unr_CSmain)
+
+################################################################################
+
+model_amy_acq_sham_threat_USmain <- lmer(
+  
+  SCR_sqrt ~ US + (1 + US | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                PHASE == "acquisition" & 
+                TUS == "sham" & 
+                CS == "threat"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_threat_USmain)
+conf_int <- confint(model_amy_acq_sham_threat_USmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_threat_USmain)
+eta_sq <- eta_squared(model_amy_acq_sham_threat_USmain, partial = TRUE)
+
+b_US <- format(summary_model$coefficients["USreinforced", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["USreinforced", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["USreinforced", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["US", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["US", "NumDF"]
+df_den <- round(anova_model["US", "DenDF"])
+
+p_value <- anova_model["US", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_threat_USmain <- glue("\033[3mb\033[0mUS = {b_US}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_threat_USmain)
+
+################################################################################
+
+model_amy_acq_sham_USexpectancy_CSmain <- lmer(
+  
+  US_EXPECTANCY ~ CS + (1 | SUBID),
+  
+  data = subset(questionnaire_df, 
+                EXPERIMENT == "amygdala" & 
+                TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_USexpectancy_CSmain)
+conf_int <- confint(model_amy_acq_sham_USexpectancy_CSmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_USexpectancy_CSmain)
+eta_sq <- eta_squared(model_amy_acq_sham_USexpectancy_CSmain, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_USexpectancy_CSmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_USexpectancy_CSmain)
+
+################################################################################
+
+model_amy_acq_sham_CSvalence_CSmain <- lmer(
+  
+  CS_VALENCE ~ CS + (1 | SUBID),
+  
+  data = subset(questionnaire_df, 
+                EXPERIMENT == "amygdala" & 
+                  TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_CSvalence_CSmain)
+conf_int <- confint(model_amy_acq_sham_CSvalence_CSmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_CSvalence_CSmain)
+eta_sq <- eta_squared(model_amy_acq_sham_CSvalence_CSmain, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_CSvalence_CSmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_CSvalence_CSmain)
+
+################################################################################
+
+model_amy_acq_sham_CSarousal_CSmain <- lmer(
+  
+  CS_AROUSAL ~ CS + (1 | SUBID),
+  
+  data = subset(questionnaire_df, 
+                EXPERIMENT == "amygdala" & 
+                  TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_CSarousal_CSmain)
+conf_int <- confint(model_amy_acq_sham_CSarousal_CSmain, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_CSarousal_CSmain)
+eta_sq <- eta_squared(model_amy_acq_sham_CSarousal_CSmain, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+
+eta2 <- format(eta_sq$Eta2_partial[1], digits = 2, nsmall = 2)
+
+stats_model_amy_acq_sham_CSarousal_CSmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2}")
+
+cat(stats_model_amy_acq_sham_CSarousal_CSmain)
+
+
+################################################################################
+##### TEMPORAL DYNAMICS #####
+################################################################################
+
+model_amy_acq_sham_unr_CSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                PHASE == "acquisition" & 
+                TUS == "sham" & 
+                US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_acq_sham_unr_CSxTRIAL)
+conf_int <- confint(model_amy_acq_sham_unr_CSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_acq_sham_unr_CSxTRIAL)
+eta_sq <- eta_squared(model_amy_acq_sham_unr_CSxTRIAL, partial = TRUE)
+
+b_CSxTRIAL <- sprintf("%.4f", summary_model$coefficients["CSthreat:TRIAL", "Estimate"])
+ci_lower <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 1])
+ci_upper <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 2])
+
+F_value <- sprintf("%.2f", anova_model["CS:TRIAL", "F value"])
+df_num <- anova_model["CS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TRIAL",]
+eta2_CSxTRIAL <- sprintf("%.2f", eta_CSxTRIAL$Eta2_partial)
+
+stats_model_amy_acq_sham_unr_CSxTRIAL <- glue("\033[3mb\033[0mC\033[1mS\033[0m:TRIAL = {b_CSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTRIAL}")
+
+cat(stats_model_amy_acq_sham_unr_CSxTRIAL)
+
+################################################################################
+
+model_amy_acq_sham_unr_CSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TIME + (1 + CS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "acquisition" & 
+                  TUS == "sham" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_acq_sham_unr_CSxTIME)
+
+emmeans_results <- emmeans(model_amy_acq_sham_unr_CSxTIME, 
+                           pairwise ~ CS | TIME, 
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+# Load the glue library for formatting
+library(glue)
+
+# Extract the contrast results from emmeans_results
+contrasts <- summary(emmeans_results$contrasts)
+
+# Now extract the relevant pieces of information for each time (early, mid, late)
+early_results <- contrasts[contrasts$TIME == "early", ]
+mid_results <- contrasts[contrasts$TIME == "mid", ]
+late_results <- contrasts[contrasts$TIME == "late", ]
+
+# Use sprintf to format b, SE, and t with 2 decimal places
+early_b <- sprintf("%.2f", early_results$estimate)
+early_SE <- sprintf("%.2f", early_results$SE)
+early_t <- sprintf("%.2f", early_results$t.ratio)
+early_p <- early_results$p.value
+early_df <- sprintf("%.0f", early_results$df)
+
+mid_b <- sprintf("%.2f", mid_results$estimate)
+mid_SE <- sprintf("%.2f", mid_results$SE)
+mid_t <- sprintf("%.2f", mid_results$t.ratio)
+mid_p <- mid_results$p.value
+mid_df <- sprintf("%.0f", mid_results$df)
+
+late_b <- sprintf("%.2f", late_results$estimate)
+late_SE <- sprintf("%.2f", late_results$SE)
+late_t <- sprintf("%.2f", late_results$t.ratio)
+late_p <- late_results$p.value
+late_df <- sprintf("%.0f", late_results$df)
+
+# Adjust p-values to show "< 0.0001" when below 0.0001
+early_p_formatted <- ifelse(early_p < 0.0001, "< 0.0001", sprintf("%.4f", early_p))
+mid_p_formatted <- ifelse(mid_p < 0.0001, "< 0.0001", sprintf("%.4f", mid_p))
+late_p_formatted <- ifelse(late_p < 0.0001, "< 0.0001", sprintf("%.4f", late_p))
+
+# Format them using glue
+early_text <- glue("bearly = {early_b}, SE = {early_SE}, t({early_df}) = {early_t}, p = {early_p_formatted}")
+mid_text <- glue("bmid = {mid_b}, SE = {mid_SE}, t({mid_df}) = {mid_t}, p = {mid_p_formatted}")
+late_text <- glue("blate = {late_b}, SE = {late_SE}, t({late_df}) = {late_t}, p = {late_p_formatted}")
+
+# Combine all results into one string
+final_text <- paste(early_text, mid_text, late_text, sep = "; ")
+
+# Print the formatted result
+print(final_text)
+
+################################################################################
+##### RECALL ####
+################################################################################
+
+model_amy_rec_sham_unr_CSxRECALL <- lmer(
+  
+  SCR_sqrt ~ CS * RECALL + (1 + CS + RECALL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" &
+                  !is.na(RECALL) &
+                  TUS == "sham" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_rec_sham_unr_CSxRECALL)
+conf_int <- confint(model_amy_rec_sham_unr_CSxRECALL, level = 0.95)
+anova_model <- anova(model_amy_rec_sham_unr_CSxRECALL)
+eta_sq <- eta_squared(model_amy_rec_sham_unr_CSxRECALL, partial = TRUE)
+
+b_CSxRECALL <- format(summary_model$coefficients["CSthreat:RECALLpost", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:RECALLpost", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:RECALLpost", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:RECALL", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:RECALL", "NumDF"]
+df_den <- round(anova_model["CS:RECALL", "DenDF"])
+
+p_value <- anova_model["CS:RECALL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxRECALL <- eta_sq[eta_sq$Parameter == "CS:RECALL",]
+eta2_CSxRECALL <- sprintf("%.2f", eta_CSxRECALL$Eta2_partial)
+
+stats_model_amy_rec_sham_unr_CSxRECALL <- glue("\033[3mb\033[0mCS:RECALL = {b_CSxRECALL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxRECALL}")
+
+cat(stats_model_amy_rec_sham_unr_CSxRECALL)
+
+# CS main effect: 
+
+summary_model <- summary(model_amy_rec_sham_unr_CSxRECALL)
+conf_int <- confint(model_amy_rec_sham_unr_CSxRECALL, level = 0.95)
+anova_model <- anova(model_amy_rec_sham_unr_CSxRECALL)
+eta_sq <- eta_squared(model_amy_rec_sham_unr_CSxRECALL, partial = TRUE)
+
+b_CS <- format(summary_model$coefficients["CSthreat", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS", "NumDF"]
+df_den <- round(anova_model["CS", "DenDF"])
+
+p_value <- anova_model["CS", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CS <- eta_sq[eta_sq$Parameter == "CS",]
+eta2_CS <- sprintf("%.2f", eta_CS$Eta2_partial)
+
+stats_model_amy_rec_sham_unr_CSxRECALLmain <- glue("\033[3mb\033[0mCS = {b_CS}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CS}")
+
+cat(stats_model_amy_rec_sham_unr_CSxRECALLmain)
+
+################################################################################
+##### EXTINCTION ####
+################################################################################
+
+################################################################################
+##### TEMPORAL DYNAMICS #####
+################################################################################
+
+model_amy_ext_sham_CSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "extinction" & 
+                  TUS == "sham" &
+                  TRIAL != "1"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_ext_sham_CSxTRIAL)
+conf_int <- confint(model_amy_ext_sham_CSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_ext_sham_CSxTRIAL)
+eta_sq <- eta_squared(model_amy_ext_sham_CSxTRIAL, partial = TRUE)
+
+b_CSxTRIAL <- sprintf("%.4f", summary_model$coefficients["CSthreat:TRIAL", "Estimate"])
+ci_lower <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 1])
+ci_upper <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 2])
+
+F_value <- sprintf("%.2f", anova_model["CS:TRIAL", "F value"])
+df_num <- anova_model["CS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TRIAL",]
+eta2_CSxTRIAL <- sprintf("%.2f", eta_CSxTRIAL$Eta2_partial)
+
+stats_model_amy_ext_sham_CSxTRIAL <- glue("\033[3mb\033[0mC\033[1mS\033[0m:TRIAL = {b_CSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTRIAL}")
+
+cat(stats_model_amy_ext_sham_CSxTRIAL)
+
+# TRIAL 1 excluded
+# bCS:TRIAL = -0.0152, 95% CI = [-0.0322, 0.0018], F(1, 66) = 3.05, p = 0.0854, ηₚ² = 0.04
+# TRIAL 1 included
+# bCS:TRIAL = -0.0147, 95% CI = [-0.0291, -0.0003], F(1, 94) = 3.97, p = 0.0492, ηₚ² = 0.04
+
+################################################################################
+
+model_amy_ext_sham_CSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TIME + (1 + CS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "extinction" & 
+                  TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_ext_sham_CSxTIME)
+
+emmeans_results <- emmeans(model_amy_ext_sham_CSxTIME, 
+                           pairwise ~ CS | TIME, 
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+# Load the glue library for formatting
+library(glue)
+
+# Extract the contrast results from emmeans_results
+contrasts <- summary(emmeans_results$contrasts)
+
+# Now extract the relevant pieces of information for each time (early, mid, late)
+early_results <- contrasts[contrasts$TIME == "early", ]
+late_results <- contrasts[contrasts$TIME == "late", ]
+
+# Use sprintf to format b, SE, and t with 2 decimal places
+early_b <- sprintf("%.2f", early_results$estimate)
+early_SE <- sprintf("%.2f", early_results$SE)
+early_t <- sprintf("%.2f", early_results$t.ratio)
+early_p <- early_results$p.value
+early_df <- sprintf("%.0f", early_results$df)
+
+late_b <- sprintf("%.2f", late_results$estimate)
+late_SE <- sprintf("%.2f", late_results$SE)
+late_t <- sprintf("%.2f", late_results$t.ratio)
+late_p <- late_results$p.value
+late_df <- sprintf("%.0f", late_results$df)
+
+# Adjust p-values to show "< 0.0001" when below 0.0001
+early_p_formatted <- ifelse(early_p < 0.0001, "< 0.0001", sprintf("%.4f", early_p))
+late_p_formatted <- ifelse(late_p < 0.0001, "< 0.0001", sprintf("%.4f", late_p))
+
+# Format them using glue
+early_text <- glue("bearly = {early_b}, SE = {early_SE}, t({early_df}) = {early_t}, p = {early_p_formatted}")
+late_text <- glue("blate = {late_b}, SE = {late_SE}, t({late_df}) = {late_t}, p = {late_p_formatted}")
+
+# Combine all results into one string
+final_text <- paste(early_text, late_text, sep = "; ")
+
+# Print the formatted result
+print(final_text)
+
+# TRIAL 1 excluded
+# bearly = 0.12, t(40) = 3.51, p = 0.0011; blate = 0.04, t(40) = 1.07, p = 0.2895
+# TRIAL 1 included
+# bearly = 0.12, t(42) = 3.77, p = 0.0005; blate = 0.04, t(42) = 1.11, p = 0.2728
+
+
+################################################################################
+##### REINST ####
+################################################################################
+
+model_amy_rec_sham_unr_CSxREINST <- lmer(
+  
+  SCR_sqrt ~ CS * REINST + (1 + CS + REINST | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" &
+                  !is.na(REINST) &
+                  TUS == "sham" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_rec_sham_unr_CSxREINST)
+conf_int <- confint(model_amy_rec_sham_unr_CSxREINST, level = 0.95)
+anova_model <- anova(model_amy_rec_sham_unr_CSxREINST)
+eta_sq <- eta_squared(model_amy_rec_sham_unr_CSxREINST, partial = TRUE)
+
+b_CSxREINST <- format(summary_model$coefficients["CSthreat:REINSTpost", "Estimate"], digits = 4, nsmall = 4)
+ci_lower <- format(conf_int["CSthreat:REINSTpost", 1], digits = 4, nsmall = 4)
+ci_upper <- format(conf_int["CSthreat:REINSTpost", 2], digits = 4, nsmall = 4)
+
+F_value <- format(anova_model["CS:REINST", "F value"], digits = 2, nsmall = 2)
+df_num <- anova_model["CS:REINST", "NumDF"]
+df_den <- round(anova_model["CS:REINST", "DenDF"])
+
+p_value <- anova_model["CS:REINST", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxREINST <- eta_sq[eta_sq$Parameter == "CS:REINST",]
+eta2_CSxREINST <- sprintf("%.2f", eta_CSxREINST$Eta2_partial)
+
+stats_model_amy_rec_sham_unr_CSxREINST <- glue("\033[3mb\033[0mCS:REINST = {b_CSxREINST}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxREINST}")
+
+cat(stats_model_amy_rec_sham_unr_CSxREINST)
+
+################################################################################
+##### EXTINCTION ####
+################################################################################
+
+################################################################################
+##### TEMPORAL DYNAMICS #####
+################################################################################
+
+model_amy_test_sham_CSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "test" & 
+                  TUS == "sham" &
+                  TRIAL != "1"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+summary_model <- summary(model_amy_test_sham_CSxTRIAL)
+conf_int <- confint(model_amy_test_sham_CSxTRIAL, level = 0.95)
+anova_model <- anova(model_amy_test_sham_CSxTRIAL)
+eta_sq <- eta_squared(model_amy_test_sham_CSxTRIAL, partial = TRUE)
+
+b_CSxTRIAL <- sprintf("%.4f", summary_model$coefficients["CSthreat:TRIAL", "Estimate"])
+ci_lower <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 1])
+ci_upper <- sprintf("%.4f", conf_int["CSthreat:TRIAL", 2])
+
+F_value <- sprintf("%.2f", anova_model["CS:TRIAL", "F value"])
+df_num <- anova_model["CS:TRIAL", "NumDF"]
+df_den <- round(anova_model["CS:TRIAL", "DenDF"])
+
+p_value <- anova_model["CS:TRIAL", "Pr(>F)"]
+p_value_formatted <- ifelse(p_value < 0.0001, "<0.0001", sprintf("%.4f", p_value))
+
+eta_CSxTRIAL <- eta_sq[eta_sq$Parameter == "CS:TRIAL",]
+eta2_CSxTRIAL <- sprintf("%.2f", eta_CSxTRIAL$Eta2_partial)
+
+stats_model_amy_test_sham_CSxTRIAL <- glue("\033[3mb\033[0mC\033[1mS\033[0m:TRIAL = {b_CSxTRIAL}, 95% CI = [{ci_lower}, {ci_upper}], \033[3mF\033[0m({df_num}, {df_den}) = {F_value}, \033[3mp\033[0m = {p_value_formatted}, ηₚ² = {eta2_CSxTRIAL}")
+
+cat(stats_model_amy_test_sham_CSxTRIAL)
+
+# TRIAL 1 excluded
+# bCS:TRIAL = 0.0034, 95% CI = [-0.0112, 0.0181], F(1, 193) = 0.21, p = 0.6474, ηₚ² = 0.00
+# TRIAL 1 included
+# bCS:TRIAL = -0.0137, 95% CI = [-0.0282, 0.0008], F(1, 28) = 3.31, p = 0.0793, ηₚ² = 0.10
+
+################################################################################
+
+model_amy_test_sham_CSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TIME + (1 + CS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "test" & 
+                  TUS == "sham"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_test_sham_CSxTIME)
+
+emmeans_results <- emmeans(model_amy_test_sham_CSxTIME, 
+                           pairwise ~ CS | TIME, 
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+# Load the glue library for formatting
+library(glue)
+
+# testract the contrast results from emmeans_results
+contrasts <- summary(emmeans_results$contrasts)
+
+# Now testract the relevant pieces of information for each time (early, mid, late)
+early_results <- contrasts[contrasts$TIME == "early", ]
+late_results <- contrasts[contrasts$TIME == "late", ]
+
+# Use sprintf to format b, SE, and t with 2 decimal places
+early_b <- sprintf("%.2f", early_results$estimate)
+early_SE <- sprintf("%.2f", early_results$SE)
+early_t <- sprintf("%.2f", early_results$t.ratio)
+early_p <- early_results$p.value
+early_df <- sprintf("%.0f", early_results$df)
+
+late_b <- sprintf("%.2f", late_results$estimate)
+late_SE <- sprintf("%.2f", late_results$SE)
+late_t <- sprintf("%.2f", late_results$t.ratio)
+late_p <- late_results$p.value
+late_df <- sprintf("%.0f", late_results$df)
+
+# Adjust p-values to show "< 0.0001" when below 0.0001
+early_p_formatted <- ifelse(early_p < 0.0001, "< 0.0001", sprintf("%.4f", early_p))
+late_p_formatted <- ifelse(late_p < 0.0001, "< 0.0001", sprintf("%.4f", late_p))
+
+# Format them using glue
+early_ttest <- glue("bearly = {early_b}, SE = {early_SE}, t({early_df}) = {early_t}, p = {early_p_formatted}")
+late_ttest <- glue("blate = {late_b}, SE = {late_SE}, t({late_df}) = {late_t}, p = {late_p_formatted}")
+
+# Combine all results into one string
+final_ttest <- paste(early_ttest, late_ttest, sep = "; ")
+
+# Print the formatted result
+print(final_ttest)
+
+# TRIAL 1 excluded
+# bearly = 0.01, t(45) = 0.33, p = 0.7451; blate = 0.02, t(45) = 0.78, p = 0.4415
+# TRIAL 1 included
+# bearly = 0.05, t(48) = 2.29, p = 0.0263; blate = 0.02, t(48) = 0.89, p = 0.3798
+
+
+
+
+
+
+

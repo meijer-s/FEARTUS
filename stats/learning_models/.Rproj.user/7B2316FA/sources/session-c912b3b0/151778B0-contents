@@ -1,0 +1,55 @@
+US.TUS.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ US * TUS + (1 + US * TUS | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & CS == "threat"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(US.TUS.model.amygdala.acquisition.unreinforced)
+
+US.TUS.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ US * TUS + (1 + US * TUS | SUBID),
+  data = subset(scr_df, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & CS == "threat"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(US.TUS.model.hippocampus.acquisition.unreinforced)
+
+US.TUS.HABI.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ US * TUS + log(TRIAL) + (1 + US * TUS | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & CS == "threat"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(US.TUS.HABI.model.amygdala.acquisition.unreinforced)
+
+US.TUS.HABI.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ US * TUS + log(TRIAL) + (1 + US * TUS | SUBID),
+  data = subset(scr_df, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & CS == "threat"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(US.TUS.HABI.model.hippocampus.acquisition.unreinforced)
+
+# Step 1: Filter the data and fit the model to capture the effect of log(TRIAL)
+filtered_data <- subset(scr_df, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & CS == "threat")
+
+# Fit the habituation model with log(TRIAL) to capture habituation effects
+habituation_model <- lmer(SCR_sqrt ~ log(TRIAL) + (1 + log(TRIAL) | SUBID),
+                          data = filtered_data,
+                          control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+                                                calc.derivs = FALSE,
+                                                optimizer = "nloptwrap"))
+
+# Extract residuals from the habituation model
+filtered_data$residuals <- resid(habituation_model)
+
+# Step 2: Fit the interaction model on the residuals
+interaction_model <- lmer(residuals ~ US * TUS + (1 + US * TUS | SUBID),
+                          data = filtered_data,
+                          control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+                                                calc.derivs = FALSE,
+                                                optimizer = "nloptwrap"))
+
+# Step 3: Check ANOVA for the main model to assess significance of interactions
+anova(interaction_model)
+

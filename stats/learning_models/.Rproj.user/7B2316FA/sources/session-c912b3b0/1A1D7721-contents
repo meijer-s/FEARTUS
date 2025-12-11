@@ -1,0 +1,271 @@
+create_boxplots_CS_VALENCE_CSdiff <- function(df, EXPERIMENT_filter, PHASE_filter, US_filter) {
+  
+  EXPERIMENT_filter <- as.character(substitute(EXPERIMENT_filter))
+  PHASE_filter <- as.character(substitute(PHASE_filter))
+  US_filter <- as.character(substitute(US_filter))
+  
+  df <- df %>% filter(EXPERIMENT == EXPERIMENT_filter &
+                        PHASE == PHASE_filter &
+                        US == US_filter)
+  
+  df <- df %>%
+    distinct(SUBID, TUS, CS, US_EXPECTANCY, CS_VALENCE, CS_AROUSAL)
+  
+  df <- df %>%
+    mutate(CS_VALENCE = case_when(
+      CS_VALENCE == 7 ~ 1,
+      CS_VALENCE == 6 ~ 2,
+      CS_VALENCE == 5 ~ 3,
+      CS_VALENCE == 4 ~ 4,
+      CS_VALENCE == 3 ~ 5,
+      CS_VALENCE == 2 ~ 6,
+      CS_VALENCE == 1 ~ 7,
+      TRUE ~ CS_VALENCE  # Keep original value if it doesn't match
+    ))
+  
+  SUBID_mean <- df %>%
+    group_by(SUBID, TUS, CS) %>%
+    dplyr::summarise(mean_US_EXPECTANCY = mean(US_EXPECTANCY, na.rm = TRUE),
+                     mean_CS_VALENCE = mean(CS_VALENCE, na.rm = TRUE),
+                     mean_CS_AROUSAL = mean(CS_AROUSAL, na.rm = TRUE))
+  
+  SUBID_mean <- SUBID_mean %>%
+    group_by(SUBID, TUS) %>%
+    dplyr::summarise(
+      CSdiff_CS_VALENCE = mean_CS_VALENCE[CS == "threat"] - mean_CS_VALENCE[CS == "control"],
+      CSdiff_CS_VALENCE = mean_CS_VALENCE[CS == "threat"] - mean_CS_VALENCE[CS == "control"],
+      CSdiff_CS_AROUSAL = mean_CS_AROUSAL[CS == "threat"] - mean_CS_AROUSAL[CS == "control"],
+      TUS = as.numeric(TUS),
+      TUS = ifelse(TUS == 1, .5, TUS),
+      TUS = ifelse(TUS == 2, 1, TUS)
+    ) %>%
+    distinct(SUBID, TUS, .keep_all = TRUE)
+  
+  SUBID_mean_report <- SUBID_mean %>%
+    group_by(SUBID, TUS) %>%
+    dplyr::summarise(mean_CSdiff_CS_VALENCE = mean(CSdiff_CS_VALENCE, na.rm = TRUE),
+                     mean_CSdiff_CS_VALENCE = mean(CSdiff_CS_VALENCE, na.rm = TRUE),
+                     mean_CSdiff_CS_AROUSAL = mean(CSdiff_CS_AROUSAL, na.rm = TRUE))
+  
+  dynamic_name <- paste("A", EXPERIMENT_filter, sep = "_")
+  assign(dynamic_name, SUBID_mean_report, envir = .GlobalEnv)
+  
+  set.seed(321)
+  SUBID_mean$TUS_jitter <- jitter(SUBID_mean$TUS, amount = .05)
+  
+  summary_data_figure <- summarySE(
+    SUBID_mean,
+    measurevar = "CSdiff_CS_VALENCE",
+    groupvars = c("TUS"),
+    na.rm = TRUE,
+    conf.interval = 0.95)
+  
+  summary_data_figure$TUS <- as.numeric(summary_data_figure$TUS)
+  
+  # Calculate the relative position for hjust
+  x_limits <- c(0, 6)
+  target_x <- 1
+  relative_position <- (target_x - x_limits[1]) / (x_limits[2] - x_limits[1])
+  
+  # Shapes for plotting
+  if (EXPERIMENT_filter == "amygdala") {
+    shape_num <- 22
+  } else if (EXPERIMENT_filter == "hippocampus"){
+    shape_num <- 21
+  } else {
+    stop("Invalid EXPERIMENT filter specified. Use 'amygdala' or 'hippocampus'.")
+  }
+  
+  # Colors for plotting
+  if (EXPERIMENT_filter == "amygdala") {
+    sham_color = "#A6A0D9"
+    active_color = "#1F78B4"
+    fill = "white"
+  } else if (EXPERIMENT_filter == "hippocampus") {
+    sham_color = "#C4BFA1"
+    active_color = "#996633"
+    fill = "white"
+  } else {
+    stop("Invalid TUS filter specified. Use 'sham' or 'active'.")
+  }
+  
+  # Adjust y-limits based on US parameter
+  
+  y_limits <- c(-7, 7)
+  y_breaks <- c(-7, 0, 7)
+  y_labels <- c("100%", "0", "100%") # "more positive", "0", "more negative"
+  
+  
+  x_breaks=c(.5, 1)
+  x_labels=c("safety", "threat")
+  x_limits=c(.35, 1.65)
+  
+  # CREATE PLOT
+  boxplot_SCR <- 
+    
+    ggplot(data = SUBID_mean, 
+           aes(y = CSdiff_CS_VALENCE)) +
+    
+    
+    geom_hline(yintercept = 0, color = "black", linetype = "dashed", size = .5) +
+    
+    # geom_bar(
+    #   data = summary_data_figure %>% filter(TUS == "0.5"),  # Use numeric 1 instead of "1"
+    #   aes(x = TUS, y = CSdiff_CS_VALENCE),
+    #   stat = "identity",
+    #   fill = sham_color,
+    #   color = "black",
+    #   size = .5,
+    #   position = position_dodge(width = 0.5),
+    #   width = .2) +
+    # geom_bar(
+  #   data = summary_data_figure %>% filter(TUS == "1"),
+  #   aes(x = TUS, y = CSdiff_CS_VALENCE),
+  #   stat = "identity",
+  #   fill = active_color,
+  #   color = "black",
+  #   size = .5,
+  #   position = position_dodge(width = 0.5),
+  #   width = .2) +
+  
+  # Violin plot for TUS == 0.5
+  # Half Violin plot for TUS == "0.5" (sham condition)
+  geom_half_violin(
+    data = SUBID_mean %>% filter(TUS == "0.5"),
+    aes(x = TUS, y = CSdiff_CS_VALENCE, group = as.factor(TUS)), 
+    position = position_nudge(x = -0.25), 
+    side = "l", 
+    fill = sham_color, 
+    alpha = 0.3, 
+    color = sham_color, 
+    trim = TRUE
+  ) +
+    # Half Violin plot for TUS == "1" (active condition)
+    geom_half_violin(
+      data = SUBID_mean %>% filter(TUS == "1"),
+      aes(x = TUS, y = CSdiff_CS_VALENCE, group = as.factor(TUS)),
+      position = position_nudge(x = 0.25),
+      side = "r", 
+      fill = active_color, 
+      alpha = 0.3, 
+      color = active_color, 
+      trim = TRUE
+    ) +
+    # Boxplot inside the half-violin plot for TUS == "0.5"
+    
+    geom_boxplot(
+      data = SUBID_mean %>% filter(TUS == "0.5"),
+      aes(x = TUS, y = CSdiff_CS_VALENCE, group = as.factor(TUS)),
+      position = position_nudge(x = -.25),
+      fill = "white",
+      width = 0.1,
+      outlier.size = 2,
+      outlier.shape = shape_num
+    ) +
+    geom_boxplot(
+      data = SUBID_mean %>% filter(TUS == "1"),
+      aes(x = TUS, y = CSdiff_CS_VALENCE, group = as.factor(TUS)),
+      position = position_nudge(x = .25),
+      fill = "white",
+      width = 0.1,
+      outlier.size = 2,
+      outlier.shape = shape_num
+    ) +
+    
+    geom_line(
+      data = SUBID_mean,
+      aes(x = TUS_jitter, group = SUBID),  # Offset to position lines
+      color = '#A0AABA',
+      alpha = .25
+    ) +
+    
+  geom_point(
+    data = SUBID_mean %>% filter(TUS == "0.5"),
+    aes(x = TUS_jitter),
+    shape = shape_num,
+    fill = sham_color,
+    color = sham_color,
+    size = 2,
+    stroke = .75,
+    alpha = .8,
+    position = position_nudge(x = 0)) +
+    geom_point(
+      data = SUBID_mean %>% filter(TUS == "1"),
+      aes(x = TUS_jitter),
+      shape = shape_num,
+      fill = active_color,
+      color = active_color,
+      size = 2,
+      stroke = .75,
+      alpha = .8,
+      position = position_nudge(x = 0)) +
+  
+  geom_point(
+    data = summary_data_figure,
+    aes(x = TUS, y = CSdiff_CS_VALENCE),
+    colour="black",
+    size = 4,
+    shape = 18,
+    position = position_nudge(x = 0, y = 0)) +
+    
+    geom_errorbar(
+      data = summary_data_figure,
+      aes(x = TUS, y = CSdiff_CS_VALENCE, ymin = CSdiff_CS_VALENCE - se, ymax = CSdiff_CS_VALENCE + se),
+      width = 0.15, 
+      linewidth = 1,
+      position = position_nudge(x = 0, y = 0)) +
+    
+    geom_line(
+      data = summary_data_figure %>% filter(TUS %in% c(.5, 1)),
+      aes(x = TUS, y = CSdiff_CS_VALENCE), 
+      color = 'black', 
+      size = 1, 
+      linetype = "dashed") +
+    
+    scale_x_discrete(
+      breaks = x_breaks,
+      labels = x_labels,
+      expand = c(.05, 0)) +
+    
+    scale_y_continuous(
+      limits = y_limits,
+      breaks = y_breaks,
+      labels = y_labels,
+      expand = c(0, 0)) +
+    
+    theme_classic() +
+    
+    xlab("") + 
+    #ylab(bquote(atop(bold("Retrospective shock expectancy ratings"), "(probability of receiving a shock)"))) +
+    ylab(bquote(atop(bold("CS valence"), "(threat - safety)"))) +
+    
+    theme(
+      plot.title = element_text(size = 18, face = "bold", colour = "black", vjust = 1, hjust = .5),   
+      axis.title.y = element_text(size = 14, face ="bold", colour = "black", lineheight = 1.3),
+      axis.text.x = element_text(size=14, colour= "black", vjust = .5),
+      axis.text.y = element_text(size=14, colour= "black", hjust = .5))
+  
+  # theme(
+  #   panel.background = element_rect(fill = "#E8ECF1", color = NA),
+  #   plot.background = element_rect(fill = "white", color = NA)
+  # )
+  
+  # + geom_segment(aes(x = 0.35, xend = .85, y = 0, yend = 0), color = "black", size = 1)
+  
+  print(boxplot_SCR)
+  # Save the plot as a PDF with specified dimensions and resolution
+  # ggsave(
+  #   filename = sprintf("/Volumes/project/3023001.06/code/psychophysiology/manuscript_figures/%s_%s_%s_%s_trialplot_SCR.pdf", 
+  #                       EXPERIMENT_filter, PHASE_filter, TUS_filter, US_filter),
+  #   plot = trialplot_SCR, 
+  #   device = cairo_pdf, # ensures correct handling of text and graphics
+  #   width = 9, # 12 previously
+  #   height = 9, 
+  #   units = "cm", 
+  #   dpi = 300
+  # )
+  
+  return(boxplot_SCR)
+  
+}
+

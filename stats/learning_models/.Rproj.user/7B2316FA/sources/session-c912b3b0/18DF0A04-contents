@@ -1,0 +1,194 @@
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/cs_quest_df.RData")
+
+library(dplyr)
+
+load("/Volumes/project/3023001.06/experiments/scr_df.RData")
+cue_df <- scr_df
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/scr_df.RData")
+
+# --- load data (as you had) ---
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/cs_quest_df.RData")
+library(dplyr)
+
+load("/Volumes/project/3023001.06/experiments/scr_df.RData")
+cue_df <- scr_df
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/scr_df.RData")
+
+cs_quest_df <- cs_quest_df %>%
+  mutate(
+    SUBID = as.integer(SUBID),  # ensure numeric for arithmetic
+    SUBID = if_else(EXPERIMENT == "hippocampus", SUBID + 25L, SUBID),
+    SUBID = sprintf("%02d", SUBID)  # optional: keep leading zeros like "01", "26"
+  )
+
+# --- renumber SUBID within each experiment (unchanged) ---
+cue_df <- cue_df %>%
+  ungroup() %>%
+  group_by(EXPERIMENT) %>%
+  mutate(SUBID = sprintf("%02d", as.numeric(factor(SUBID)))) %>%
+  ungroup()
+
+# Apply the SAME +25 policy to cue_df (instead of within-experiment renumbering)
+cue_df <- cue_df %>%
+  mutate(
+    SUBID = as.integer(SUBID),                         # ensure numeric
+    SUBID = if_else(EXPERIMENT == "hippocampus", SUBID + 25L, SUBID),
+    SUBID = sprintf("%02d", SUBID)                     # pad to "01","26",...
+  )
+
+# --- Build a unique lookup: one CUE per (EXPERIMENT, SUBID, CS, TUS) (unchanged) ---
+cue_lookup <- cue_df %>%
+  ungroup() %>%
+  select(EXPERIMENT, SUBID, CS, TUS, CUE) %>%
+  distinct()
+
+# Optional duplicate check (unchanged)
+dup_keys <- cue_lookup %>%
+  count(EXPERIMENT, SUBID, CS, TUS) %>%
+  filter(n > 1)
+
+if (nrow(dup_keys) > 0) {
+  # Resolve duplicates by choosing the most frequent CUE per key (unchanged)
+  cue_lookup <- cue_df %>%
+    ungroup() %>%
+    select(EXPERIMENT, SUBID, CS, TUS, CUE) %>%
+    group_by(EXPERIMENT, SUBID, CS, TUS) %>%
+    summarise(CUE = as.integer(names(which.max(table(CUE)))), .groups = "drop")
+}
+
+# --- Join CUE into scr_df without expanding rows (unchanged) ---
+scr_df <- scr_df %>%
+  left_join(cue_lookup, by = c("EXPERIMENT", "SUBID", "CS", "TUS"))
+
+# --- Build lookup per (EXPERIMENT, SUBID, CUE) and include BOTH TUS and CS (CHANGED) ---
+# First ensure CUE types match later joins (coerce to character)
+scr_lookup <- scr_df %>%
+  mutate(CUE = as.character(CUE)) %>%
+  select(EXPERIMENT, SUBID, CUE, TUS, CS) %>%
+  distinct()
+
+# Optional: sanity check uniqueness (same step as before, now for both TUS & CS)
+dup_keys2 <- scr_lookup %>%
+  count(EXPERIMENT, SUBID, CUE) %>%
+  filter(n > 1)
+
+if (nrow(dup_keys2) > 0) {
+  # Resolve by taking the most frequent label per key (robust to minor inconsistencies)
+  scr_lookup <- scr_df %>%
+    mutate(CUE = as.character(CUE)) %>%
+    group_by(EXPERIMENT, SUBID, CUE) %>%
+    summarise(
+      TUS = names(which.max(table(TUS))),
+      CS  = names(which.max(table(CS))),
+      .groups = "drop"
+    )
+}
+
+# --- Join into cs_quest_df without growing it (CHANGED: adds both TUS and CS) ---
+cs_quest_df <- cs_quest_df %>%
+  mutate(CUE = as.character(CUE)) %>%
+  left_join(scr_lookup, by = c("EXPERIMENT", "SUBID", "CUE"))
+
+
+
+
+
+
+
+
+
+df <- cs_quest_df %>% 
+  filter(EXPERIMENT == "hippocampus",
+         TUS == "sham")
+
+model <- lmer(
+  CS_VALENCE ~ CS + (1 | SUBID),
+  data = df,
+  control = ctrl_nlopt
+)
+anova(model)
+
+
+
+
+# make sure TUS and CS are factors
+cs_quest_df <- cs_quest_df %>%
+  mutate(
+    CS = factor(CS),
+    TUS = factor(TUS)
+  )
+
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(broom)
+
+# Compute threat - control difference scores per subject and TUS, for all three variables
+cs_diff_df <- cs_quest_df %>%
+  filter(CS %in% c("control", "threat")) %>%
+  group_by(EXPERIMENT, SUBID, TUS) %>%
+  summarise(
+    diff_valence = mean(CS_VALENCE[CS == "threat"], na.rm = TRUE) -
+      mean(CS_VALENCE[CS == "control"], na.rm = TRUE),
+    diff_arousal = mean(CS_AROUSAL[CS == "threat"], na.rm = TRUE) -
+      mean(CS_AROUSAL[CS == "control"], na.rm = TRUE),
+    diff_shock   = mean(CS_SHOCK  [CS == "threat"], na.rm = TRUE) -
+      mean(CS_SHOCK  [CS == "control"], na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Run one-sample t-tests (vs 0) for each measure per experiment × TUS
+cs_ttests_df <- cs_diff_df %>%
+  group_by(EXPERIMENT, TUS) %>%
+  summarise(
+    across(
+      starts_with("diff_"),
+      list(
+        mean = ~ mean(.x, na.rm = TRUE),
+        t    = ~ t.test(.x, mu = 0)$statistic,
+        df   = ~ t.test(.x, mu = 0)$parameter,
+        p    = ~ t.test(.x, mu = 0)$p.value
+      ),
+      .names = "{.col}_{.fn}"
+    ),
+    .groups = "drop"
+  )
+
+print(cs_ttests_df, n = Inf)
+
+
+cs_paired_ttests_df <- cs_diff_df %>%
+  tidyr::pivot_wider(
+    names_from = TUS,
+    values_from = c(diff_valence, diff_arousal, diff_shock)
+  ) %>%
+  dplyr::group_by(EXPERIMENT) %>%
+  dplyr::summarise(
+    # VALENCE
+    t_valence  = as.numeric(t.test(diff_valence_active, diff_valence_sham, paired = TRUE)$statistic),
+    df_valence = as.numeric(t.test(diff_valence_active, diff_valence_sham, paired = TRUE)$parameter),
+    p_valence  = t.test(diff_valence_active, diff_valence_sham, paired = TRUE)$p.value,
+    
+    # AROUSAL
+    t_arousal  = as.numeric(t.test(diff_arousal_active, diff_arousal_sham, paired = TRUE)$statistic),
+    df_arousal = as.numeric(t.test(diff_arousal_active, diff_arousal_sham, paired = TRUE)$parameter),
+    p_arousal  = t.test(diff_arousal_active, diff_arousal_sham, paired = TRUE)$p.value,
+    
+    # SHOCK
+    t_shock    = as.numeric(t.test(diff_shock_active, diff_shock_sham, paired = TRUE)$statistic),
+    df_shock   = as.numeric(t.test(diff_shock_active, diff_shock_sham, paired = TRUE)$parameter),
+    p_shock    = t.test(diff_shock_active, diff_shock_sham, paired = TRUE)$p.value,
+    
+    .groups = "drop"
+  )
+
+
+cs_paired_ttests_df <- cs_paired_ttests_df %>%
+  mutate(
+    dz_valence = ifelse(p_valence < 0.05, t_valence / sqrt(df_valence + 1), NA_real_),
+    dz_arousal = ifelse(p_arousal < 0.05, t_arousal / sqrt(df_arousal + 1), NA_real_),
+    dz_shock   = ifelse(p_shock   < 0.05, t_shock   / sqrt(df_shock   + 1), NA_real_)
+  )
+
+
+cs_paired_ttests_df

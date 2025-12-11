@@ -1,0 +1,165 @@
+# The residuals approach can be useful if you are only interested in the effects 
+# after regressing out the variation due to log(TRIAL) and believe that it may 
+# not be directly relevant to the main hypotheses.
+
+CS.TUS.TRIAL.HABI.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TRIAL + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TRIAL.HABI.model.amygdala.acquisition.unreinforced)
+
+# Type III Analysis of Variance Table with Satterthwaite's method
+#               Sum Sq Mean Sq NumDF  DenDF F value    Pr(>F)    
+# CS           0.62603 0.62603     1 29.444 10.1041  0.003466 ** 
+# TUS          0.06523 0.06523     1 26.243  1.0529  0.314214    
+# TRIAL        0.17815 0.17815     1 24.010  2.8753  0.102879    
+# log(TRIAL)   2.57261 2.57261     1 23.916 41.5220 1.176e-06 ***
+# CS:TUS       0.29841 0.29841     1 39.150  4.8163  0.034189 *  
+# CS:TRIAL     0.51062 0.51062     1 24.789  8.2415  0.008258 ** 
+# TUS:TRIAL    0.62845 0.62845     1 42.866 10.1432  0.002699 ** 
+# CS:TUS:TRIAL 0.32687 0.32687     1 45.566  5.2757  0.026272 *
+
+CS.TUS.TRIAL.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TRIAL.model.amygdala.acquisition.unreinforced)
+
+CS.TUS.TRIAL.HABI.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TRIAL + log(TRIAL) + (1 + CS * TUS * TRIAL + log(TRIAL) | SUBID),
+  data = subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TRIAL.HABI.model.amygdala.acquisition.unreinforced)
+
+anova(CS.TUS.TRIAL.model.amygdala.acquisition.unreinforced, CS.TUS.TRIAL.HABI.model.amygdala.acquisition.unreinforced)
+
+#### RESIDUALS
+
+# Step 1: Filter the data and fit the model to capture the effect of log(TRIAL)
+filtered_data <- subset(scr_df, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced")
+
+# Fit the habituation model with log(TRIAL) to capture habituation effects
+habituation_model <- lmer(SCR_sqrt ~ log(TRIAL) + (1 + log(TRIAL) | SUBID),
+                          data = filtered_data,
+                          control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+                                                calc.derivs = FALSE,
+                                                optimizer = "nloptwrap"))
+
+# Extract residuals from the habituation model
+filtered_data$residuals <- resid(habituation_model) # , type = "response"
+
+# Step 2: Fit the interaction model on the residuals
+interaction_model <- lmer(residuals ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+                          data = filtered_data,
+                          control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+                                                calc.derivs = FALSE,
+                                                optimizer = "nloptwrap"))
+
+# Step 3: Check ANOVA for the main model to assess significance of interactions
+anova(interaction_model)
+
+# Type III Analysis of Variance Table with Satterthwaite's method
+#               Sum Sq Mean Sq NumDF  DenDF F value   Pr(>F)   
+# CS           0.54948 0.54948     1 41.128  8.6311 0.005395 **
+# TUS          0.06810 0.06810     1 26.276  1.0697 0.310442   
+# TRIAL        0.25309 0.25309     1 33.383  3.9755 0.054388 . 
+# CS:TUS       0.32916 0.32916     1 51.085  5.1704 0.027208 * 
+# CS:TRIAL     0.39609 0.39609     1 27.854  6.2217 0.018828 * 
+# TUS:TRIAL    0.68059 0.68059     1 46.408 10.6906 0.002033 **
+# CS:TUS:TRIAL 0.38443 0.38443     1 81.831  6.0386 0.016109 * 
+
+
+scr_df_experiments <- scr_df %>%
+  group_by(EXPERIMENT, SUBID) %>%
+  mutate(new_SUBID = case_when(
+    EXPERIMENT == "amygdala" ~ sprintf("%02d", as.integer(SUBID)),
+    EXPERIMENT == "hippocampus" ~ sprintf("%02d", as.integer(SUBID) + 35)
+  )) %>%
+  ungroup()
+
+# Step 1: Replace SUBID with SUBID_new
+scr_df_experiments$SUBID <- scr_df_experiments$new_SUBID
+
+# Step 2: Remove the SUBID_new column
+scr_df_experiments$new_SUBID <- NULL
+
+scr_df_experiments <- scr_df_experiments %>%
+  select(1, SUBID, everything())  # Select the first column, then SUBID_new, then everything else
+
+
+# Step 1: Filter the data and fit the model to capture the effect of log(TRIAL)
+filtered_data <- subset(scr_df_experiments, PHASE == "acquisition" & US == "unreinforced")
+
+# Fit the habituation model with log(TRIAL) to capture habituation effects
+habituation_model <- lmer(SCR_sqrt ~ log(TRIAL) + (1 + log(TRIAL) | SUBID),
+                          data = filtered_data,
+                          control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+                                                calc.derivs = FALSE,
+                                                optimizer = "nloptwrap"))
+
+# Extract residuals from the habituation model
+filtered_data$residuals <- resid(habituation_model)
+
+# Step 2: Fit the interaction model on the residuals
+interaction_model <- lmer(residuals ~ EXPERIMENT * CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+                          data = filtered_data,
+                          control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+                                                calc.derivs = FALSE,
+                                                optimizer = "nloptwrap"))
+
+# Step 3: Check ANOVA for the main model to assess significance of interactions
+anova(interaction_model)
+
+# EXPERIMENT              0.03107 0.03107     1 103.076  0.5668 0.4532659    
+# CS                      0.77183 0.77183     1  56.655 14.0792 0.0004144 ***
+#   TUS                     0.09474 0.09474     1  50.887  1.7282 0.1945381    
+# TRIAL                   0.62356 0.62356     1  56.738 11.3746 0.0013466 ** 
+#   EXPERIMENT:CS           0.03424 0.03424     1  56.655  0.6246 0.4326545    
+# EXPERIMENT:TUS          0.00712 0.00712     1  50.887  0.1299 0.7199802    
+# CS:TUS                  0.25585 0.25585     1  87.657  4.6670 0.0334757 *  
+#   EXPERIMENT:TRIAL        0.01523 0.01523     1  56.738  0.2779 0.6001614    
+# CS:TRIAL                0.65570 0.65570     1  49.814 11.9609 0.0011218 ** 
+#   TUS:TRIAL               0.78291 0.78291     1  64.820 14.2812 0.0003449 ***
+#   EXPERIMENT:CS:TUS       0.11771 0.11771     1  87.657  2.1472 0.1464049    
+# EXPERIMENT:CS:TRIAL     0.00154 0.00154     1  49.814  0.0280 0.8676951    
+# EXPERIMENT:TUS:TRIAL    0.04425 0.04425     1  64.820  0.8072 0.3722848    
+# CS:TUS:TRIAL            0.45105 0.45105     1 127.524  8.2277 0.0048296 ** 
+#   EXPERIMENT:CS:TUS:TRIAL 0.04906 0.04906     1 127.524  0.8949 0.3459300  
+
+# Step 2: Fit the interaction model on the residuals
+interaction_model_early <- lmer(residuals ~ EXPERIMENT * CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+                          data = subset(filtered_data, TIME == "early"),
+                          control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+                                                calc.derivs = FALSE,
+                                                optimizer = "nloptwrap"))
+
+# Step 3: Check ANOVA for the main model to assess significance of interactions
+anova(interaction_model_early)
+# EXPERIMENT              0.01544 0.01544     1  58.29  0.3110  0.579196    
+# CS                      1.11915 1.11915     1 354.78 22.5416 2.989e-06 ***
+#   TUS                     0.00664 0.00664     1  50.66  0.1338  0.716030    
+# TRIAL                   0.00019 0.00019     1  56.17  0.0038  0.950931    
+# EXPERIMENT:CS           0.00347 0.00347     1 354.78  0.0699  0.791590    
+# EXPERIMENT:TUS          0.00000 0.00000     1  50.66  0.0000  0.999977    
+# CS:TUS                  0.01171 0.01171     1  99.08  0.2358  0.628317    
+# EXPERIMENT:TRIAL        0.00438 0.00438     1  56.17  0.0881  0.767666    
+# CS:TRIAL                0.35521 0.35521     1 198.45  7.1545  0.008101 ** 
+#   TUS:TRIAL               0.01118 0.01118     1  58.82  0.2252  0.636857    
+# EXPERIMENT:CS:TUS       0.00590 0.00590     1  99.08  0.1189  0.730966    
+# EXPERIMENT:CS:TRIAL     0.02158 0.02158     1 198.45  0.4346  0.510482    
+# EXPERIMENT:TUS:TRIAL    0.01685 0.01685     1  58.82  0.3394  0.562411    
+# CS:TUS:TRIAL            0.00272 0.00272     1 100.97  0.0548  0.815465    
+# EXPERIMENT:CS:TUS:TRIAL 0.10067 0.10067     1 100.97  2.0276  0.157546 
+
+interaction_model_active <- lmer(residuals ~ EXPERIMENT * CS * TRIAL + (1 + CS * TRIAL | SUBID),
+                                data = subset(filtered_data, TUS == "active"),
+                                control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+                                                      calc.derivs = FALSE,
+                                                      optimizer = "nloptwrap"))
+anova(interaction_model_active)

@@ -1,0 +1,472 @@
+scr_df_test <- scr_df %>%
+  group_by(EXPERIMENT, SUBID) %>%
+  mutate(
+    # Identify if TUS changes compared to the previous row
+    TUS_CHANGE = TUS != lag(TUS, default = first(TUS)),
+    # Create a running ID for uninterrupted blocks of the same TUS condition
+    BLOCK_NEW = cumsum(TUS_CHANGE)
+  ) %>%
+  group_by(EXPERIMENT, SUBID, BLOCK_NEW, TUS) %>%
+  mutate(
+    # Recount block numbers within each uninterrupted group of the same TUS
+    TUS_TRIAL_REPETITION = row_number()
+  ) %>%
+  ungroup() %>%
+  # Set TUS_TRIAL_REPETITION to NA if PHASE is not "acquisition"
+  mutate(
+    TUS_TRIAL_REPETITION = if_else(PHASE != "acquisition", NA_real_, TUS_TRIAL_REPETITION)
+  ) %>%
+  select(-BLOCK_NEW, -TUS_CHANGE) %>% # Drop intermediate columns
+  relocate(TUS_TRIAL_REPETITION, .after = BLOCK) # Move TUS_TRIAL_REPETITION next to BLOCK
+
+scr_df_test <- scr_df_test %>%
+  group_by(EXPERIMENT, SUBID) %>%
+  mutate(
+    # Use TUS_TRIAL_REPETITION to assign TUS_BLOCK_REPETITION
+    TUS_BLOCK_REPETITION = if_else(TUS_TRIAL_REPETITION <= 4, 1, 2)
+  ) %>%
+  ungroup() %>%
+  relocate(TUS_BLOCK_REPETITION, .after = BLOCK) # Place TUS_BLOCK_REPETITION next to BLOCK
+
+scr_df_test <- scr_df_test %>%
+  group_by(EXPERIMENT, SUBID, TUS, BLOCK) %>%
+  mutate(
+    BLOCK_COUNT = row_number()  # This counts the rows within each block from 1 to 4
+  ) %>%
+  ungroup()  # Remove the grouping after the count
+
+#### TRANSFER TO SHAM ####
+
+scr_df_test$TUS_BLOCK_REPETITION <- as.factor(scr_df_test$TUS_BLOCK_REPETITION)
+
+CS.TUS_BLOCK_REPETITION.model.amygdala.acquisition.sham.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS_BLOCK_REPETITION + (1 + CS + TUS_BLOCK_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & TUS == "sham" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS_BLOCK_REPETITION.model.amygdala.acquisition.sham.unreinforced)
+
+CS.TUS_BLOCK_REPETITION.model.amygdala.acquisition.active.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS_BLOCK_REPETITION + (1 + CS * TUS_BLOCK_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & TUS == "active" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS_BLOCK_REPETITION.model.amygdala.acquisition.active.unreinforced)
+
+#
+
+CS.BLOCK_COUNT.model.amygdala.acquisition.sham.unreinforced <- lmer(
+  SCR_sqrt ~ CS * BLOCK_COUNT + log(TRIAL) + (1 + CS * BLOCK_COUNT | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & TUS == "sham" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.BLOCK_COUNT.model.amygdala.acquisition.sham.unreinforced)
+
+CS.BLOCK_COUNT.model.amygdala.acquisition.active.unreinforced <- lmer(
+  SCR_sqrt ~ CS * BLOCK_COUNT + log(TRIAL) + (1 + CS * BLOCK_COUNT | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & TUS == "active" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.BLOCK_COUNT.model.amygdala.acquisition.active.unreinforced)
+
+#### TRANSFER TO SHAM ####
+
+# Create a boxplot for TUS_TRIAL_REPETITION grouped by TUS and CS
+ggplot(scr_df_test %>% filter(!is.na(TUS_BLOCK_REPETITION)), aes(x = interaction(TUS, CS, US), y = TUS_TRIAL_REPETITION, fill = interaction(TUS, CS, US))) +
+  geom_boxplot() +
+  labs(
+    title = "Distribution of TUS_TRIAL_REPETITION by TUS * CS Conditions",
+    x = "TUS and CS Conditions",
+    y = "TUS_TRIAL_REPETITION"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") # Optional: Choose a color palette
+
+ggplot(scr_df_test %>% filter(!is.na(TUS_TRIAL_REPETITION)), aes(x = interaction(TUS, CS, US), y = TUS_TRIAL_REPETITION, fill = interaction(TUS, CS, US))) +
+  geom_boxplot() +
+  facet_grid(EXPERIMENT ~ TIME) +
+  labs(
+    title = "Distribution of TUS_TRIAL_REPETITION by TUS * CS Conditions",
+    x = "TUS and CS Conditions",
+    y = "TUS_TRIAL_REPETITION"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") # Optional: Choose a color palette
+
+
+scr_df_test <- scr_df_test %>%
+  group_by(EXPERIMENT, PHASE, SUBID) %>%
+  mutate(
+    # Use TUS_TRIAL_REPETITION to assign TUS_BLOCK_REPETITION
+    TUS_BLOCK_REPETITION = if_else(TUS_TRIAL_REPETITION <= 4, 1, 2)
+  ) %>%
+  ungroup() %>%
+  relocate(TUS_BLOCK_REPETITION, .after = BLOCK) # Place TUS_BLOCK_REPETITION next to BLOCK
+
+
+ggplot(scr_df_test %>% filter(!is.na(TUS_BLOCK_REPETITION)), aes(x = CS, fill = factor(TUS_BLOCK_REPETITION))) +
+  geom_bar(position = "dodge") +
+  facet_grid(US ~ TUS) +
+  labs(
+    title = "Frequency of TUS_BLOCK_REPETITION by TUS * CS Conditions",
+    x = "TUS and CS Conditions",
+    y = "Frequency",
+    fill = "TUS_BLOCK_REPETITION"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("1" = "skyblue", "2" = "orange")) # Optional: customize colors
+
+scr_df_test$TUS_BLOCK_REPETITION <- as.factor(scr_df_test$TUS_BLOCK_REPETITION)
+
+CS.TUS.TUS_BLOCK_REPETITION.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_BLOCK_REPETITION + (1 + CS + TUS + TUS_BLOCK_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TUS_BLOCK_REPETITION.model.amygdala.acquisition.unreinforced)
+
+# Create a new data frame with all combinations of CS, TUS, TUS_BLOCK_REPETITION
+new_data <- expand.grid(
+  CS = unique(scr_df_test$CS),
+  TUS = unique(scr_df_test$TUS),
+  TUS_BLOCK_REPETITION = unique(scr_df_test$TUS_BLOCK_REPETITION),
+  PHASE = "acquisition",
+  US = "unreinforced",
+  EXPERIMENT = "amygdala"
+)
+
+# Predict the SCR_sqrt values for each combination of CS, TUS, and TUS_BLOCK_REPETITION
+new_data$predicted_scr_sqrt <- predict(CS.TUS.TUS_BLOCK_REPETITION.model.amygdala.acquisition.unreinforced, newdata = new_data, re.form = NULL)
+
+# Plot interaction effect
+ggplot(new_data, aes(x = interaction(TUS_BLOCK_REPETITION, CS), y = predicted_scr_sqrt, color = CS)) +
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_line(aes(group = interaction(CS, TUS)), size = 1) +
+  facet_grid(~ TUS) +
+  labs(
+    title = "Interaction Effect of CS, TUS, and TUS_BLOCK_REPETITION on SCR_sqrt",
+    x = "Interaction of CS, TUS, and TUS_BLOCK_REPETITION",
+    y = "Predicted SCR_sqrt",
+    color = "CS * TUS_BLOCK_REPETITION"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+
+CS.TUS.TUS_BLOCK_REPETITION.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_BLOCK_REPETITION + log(TRIAL) + (1 + CS * TUS * TUS_BLOCK_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TUS_BLOCK_REPETITION.model.hippocampus.acquisition.unreinforced)
+
+# Plot interaction effect
+ggplot(new_data, aes(x = interaction(TUS_BLOCK_REPETITION, CS), y = predicted_scr_sqrt, color = CS)) +
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_line(aes(group = interaction(CS, TUS)), size = 1) +
+  facet_grid(~ TUS) +
+  labs(
+    title = "Interaction Effect of CS, TUS, and TUS_BLOCK_REPETITION on SCR_sqrt",
+    x = "Interaction of CS, TUS, and TUS_BLOCK_REPETITION",
+    y = "Predicted SCR_sqrt",
+    color = "CS * TUS_BLOCK_REPETITION"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+
+
+##### TUS TRIAL REPETITION ####
+
+
+CS.TUS.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced)
+
+# Create new data for prediction
+new_data <- scr_df_test %>% 
+  filter(EXPERIMENT == "amygdala", PHASE == "acquisition", US == "unreinforced") %>% 
+expand.grid(
+  SUBID = unique(.$SUBID),
+  CS = unique(.$CS),
+  TUS = unique(.$TUS),
+  TUS_TRIAL_REPETITION = seq(1, 8, by = 1),  # Adjust range based on your data
+  TRIAL = mean(.$TRIAL, na.rm = TRUE)  # Use mean trial value to keep it constant
+)
+
+# Add predicted SCR_sqrt values
+new_data$predicted_scr_sqrt <- predict(CS.TUS.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced, newdata = new_data, re.form = NULL)
+
+# Calculate mean and SEM for each group
+summary_data <- new_data %>%
+  group_by(CS, TUS, TUS_TRIAL_REPETITION) %>%
+  dplyr::summarise(
+    mean_scr_sqrt = mean(predicted_scr_sqrt, na.rm = TRUE),  # Mean of predicted SCR_sqrt
+    sem_scr_sqrt = sd(predicted_scr_sqrt, na.rm = TRUE) / sqrt(n())  # SEM
+  )
+
+# Plot the averages with SEM
+ggplot(summary_data, aes(x = TUS_TRIAL_REPETITION, y = mean_scr_sqrt, color = interaction(CS, TUS), group = interaction(CS, TUS))) +
+  geom_line(size = 1) +  # Line for each interaction
+  geom_point(size = 2) +  # Points to show the average SCR_sqrt
+  # geom_errorbar(
+  #   aes(ymin = mean_scr_sqrt - sem_scr_sqrt, ymax = mean_scr_sqrt + sem_scr_sqrt),
+  #   width = 0.2,  # Width of the error bars
+  #   size = 0.5  # Size of the error bars
+  # ) +
+  facet_grid(~ TUS) +  # Separate the plots by TUS condition
+  labs(
+    title = "Interaction Effect of CS, TUS, and TUS_TRIAL_REPETITION on SCR_sqrt",
+    x = "TUS_TRIAL_REPETITION",
+    y = "Mean SCR_sqrt with SEM",
+    color = "CS * TUS"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+
+
+CS.TUS.TUS_TRIAL_REPETITION.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TUS_TRIAL_REPETITION.model.hippocampus.acquisition.unreinforced)
+
+
+
+### threat only:
+
+CS.TUS.TUS_TRIAL_REPETITION.threat.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ TUS * TUS_TRIAL_REPETITION + log(TRIAL) + (1 + TUS * TUS_TRIAL_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & CS == "threat" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TUS_TRIAL_REPETITION.threat.model.amygdala.acquisition.unreinforced)
+
+
+#### TUS TRIAL REPETITION * TIME
+
+CS.TUS.TIME.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TIME == "early"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TIME.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced)
+
+CS.TUS.TIME.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TIME == "mid"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TIME.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced)
+
+# Create new data for prediction
+new_data <- scr_df_test %>% 
+  filter(EXPERIMENT == "amygdala", PHASE == "acquisition", US == "unreinforced" & TIME == "mid") %>% 
+  expand.grid(
+    SUBID = unique(.$SUBID),
+    CS = unique(.$CS),
+    TUS = unique(.$TUS),
+    TUS_TRIAL_REPETITION = seq(1, 8, by = 1),  # Adjust range based on your data
+    TRIAL = mean(.$TRIAL, na.rm = TRUE)  # Use mean trial value to keep it constant
+  )
+
+# Add predicted SCR_sqrt values
+new_data$predicted_scr_sqrt <- predict(CS.TUS.TIME.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced, newdata = new_data, re.form = NULL)
+
+# Calculate mean and SEM for each group
+summary_data <- new_data %>%
+  group_by(CS, TUS, TUS_TRIAL_REPETITION) %>%
+  dplyr::summarise(
+    mean_scr_sqrt = mean(predicted_scr_sqrt, na.rm = TRUE),  # Mean of predicted SCR_sqrt
+    sem_scr_sqrt = sd(predicted_scr_sqrt, na.rm = TRUE) / sqrt(n())  # SEM
+  )
+
+# Plot the averages with SEM
+ggplot(summary_data, aes(x = TUS_TRIAL_REPETITION, y = mean_scr_sqrt, color = interaction(CS, TUS), group = interaction(CS, TUS))) +
+  geom_line(size = 1) +  # Line for each interaction
+  geom_point(size = 2) +  # Points to show the average SCR_sqrt
+  # geom_errorbar(
+  #   aes(ymin = mean_scr_sqrt - sem_scr_sqrt, ymax = mean_scr_sqrt + sem_scr_sqrt),
+  #   width = 0.2,  # Width of the error bars
+  #   size = 0.5  # Size of the error bars
+  # ) +
+  facet_grid(~ TUS) +  # Separate the plots by TUS condition
+  labs(
+    title = "Interaction Effect of CS, TUS, and TUS_TRIAL_REPETITION on SCR_sqrt",
+    x = "TUS_TRIAL_REPETITION",
+    y = "Mean SCR_sqrt with SEM",
+    color = "CS * TUS"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+
+CS.TUS.TIME.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced" & TIME == "late"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TIME.TUS_TRIAL_REPETITION.model.amygdala.acquisition.unreinforced)
+
+CS.TUS.TIME.TUS_TRIAL_REPETITION.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced" & TIME == "early"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TIME.TUS_TRIAL_REPETITION.model.hippocampus.acquisition.unreinforced)
+
+CS.TUS.TIME.TUS_TRIAL_REPETITION.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced" & TIME == "mid"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TIME.TUS_TRIAL_REPETITION.model.hippocampus.acquisition.unreinforced)
+
+CS.TUS.TIME.TUS_TRIAL_REPETITION.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced" & TIME == "late"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TIME.TUS_TRIAL_REPETITION.model.hippocampus.acquisition.unreinforced)
+
+###
+
+CS.TUS.BLOCK_COUNT.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * BLOCK_COUNT + log(TRIAL) + (1 + CS * TUS * BLOCK_COUNT | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.BLOCK_COUNT.model.amygdala.acquisition.unreinforced)
+
+CS.TUS.BLOCK_COUNT.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * BLOCK_COUNT + log(TRIAL) + (1 + CS * TUS * BLOCK_COUNT | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.BLOCK_COUNT.model.hippocampus.acquisition.unreinforced)
+
+###
+
+scr_df_test <- scr_df_test %>%
+  mutate(
+    # Quadratic version (square of TUS_TRIAL_REPETITION)
+    TUS_TRIAL_REPETITION_squared = TUS_TRIAL_REPETITION^2,
+    
+    # Logarithmic version (natural log of TUS_TRIAL_REPETITION)
+    TUS_TRIAL_REPETITION_log = log(TUS_TRIAL_REPETITION),
+    
+    # Exponentiation version (TUS_TRIAL_REPETITION raised to the power of 2)
+    TUS_TRIAL_REPETITION_exp = TUS_TRIAL_REPETITION^2
+  )
+
+CS.TUS.TUS_TRIAL_REPETITION_squared.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION_squared + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION_squared | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TUS_TRIAL_REPETITION_squared.model.amygdala.acquisition.unreinforced)
+
+CS.TUS.TUS_TRIAL_REPETITION_log.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION_log + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION_log | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TUS_TRIAL_REPETITION_log.model.amygdala.acquisition.unreinforced)
+
+CS.TUS.TUS_TRIAL_REPETITION_exp.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION_exp + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION_exp | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TUS_TRIAL_REPETITION_exp.model.amygdala.acquisition.unreinforced)
+
+
+scr_df_test <- scr_df_test %>%
+  mutate(
+    # Quadratic version (square of TUS_TRIAL_REPETITION)
+    TUS_TRIAL_REPETITION_squared = TUS_TRIAL_REPETITION^2,
+    
+    # Logarithmic version (natural log of TUS_TRIAL_REPETITION)
+    TUS_TRIAL_REPETITION_log = log(TUS_TRIAL_REPETITION),
+    
+    # Exponentiation version (TUS_TRIAL_REPETITION raised to the power of 2)
+    TUS_TRIAL_REPETITION_exp = TUS_TRIAL_REPETITION^2,
+    
+    # Quadratic version (square of BLOCK_COUNT)
+    BLOCK_COUNT_squared = BLOCK_COUNT^2,
+    
+    # Logarithmic version (natural log of BLOCK_COUNT)
+    BLOCK_COUNT_log = log(BLOCK_COUNT),
+    
+    # Exponentiation version (BLOCK_COUNT raised to the power of 2)
+    BLOCK_COUNT_exp = BLOCK_COUNT^2
+  )
+
+
+CS.TUS.BLOCK_COUNT_squared.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * BLOCK_COUNT_squared + log(TRIAL) + (1 + CS * TUS * BLOCK_COUNT_squared | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.BLOCK_COUNT_squared.model.amygdala.acquisition.unreinforced)
+
+CS.TUS.BLOCK_COUNT_log.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * BLOCK_COUNT_log + log(TRIAL) + (1 + CS * TUS * BLOCK_COUNT_log | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.BLOCK_COUNT_log.model.amygdala.acquisition.unreinforced)
+
+CS.TUS.BLOCK_COUNT_exp.model.amygdala.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * BLOCK_COUNT_exp + log(TRIAL) + (1 + CS * TUS * BLOCK_COUNT_exp | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "amygdala" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.BLOCK_COUNT_exp.model.amygdala.acquisition.unreinforced)
+
+### HIPTUS
+
+CS.TUS.TUS_TRIAL_REPETITION_log.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * TUS_TRIAL_REPETITION_log + log(TRIAL) + (1 + CS * TUS * TUS_TRIAL_REPETITION_log | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.TUS_TRIAL_REPETITION_log.model.hippocampus.acquisition.unreinforced)
+
+
+CS.TUS.BLOCK_COUNT_log.model.hippocampus.acquisition.unreinforced <- lmer(
+  SCR_sqrt ~ CS * TUS * BLOCK_COUNT_log + log(TRIAL) + (1 + CS * TUS * BLOCK_COUNT_log | SUBID),
+  data = subset(scr_df_test, EXPERIMENT == "hippocampus" & PHASE == "acquisition" & US == "unreinforced"),
+  control = lmerControl(optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"), calc.derivs = FALSE, optimizer = "nloptwrap")
+)
+
+anova(CS.TUS.BLOCK_COUNT_log.model.hippocampus.acquisition.unreinforced)

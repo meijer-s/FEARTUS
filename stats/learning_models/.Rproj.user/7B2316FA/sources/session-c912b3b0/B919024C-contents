@@ -1,0 +1,111 @@
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(broom)
+
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/cs_quest_df.RData")
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/tus_quest_df.RData")
+
+#### CS questionnaire #### 
+
+# Compute threat - control difference scores per subject and TUS, for all three variables
+cs_diff_df <- cs_quest_df %>%
+  filter(CS %in% c("control", "threat")) %>%
+  group_by(EXPERIMENT, SUBID, TUS) %>%
+  summarise(
+    diff_valence = mean(CS_VALENCE[CS == "threat"], na.rm = TRUE) -
+      mean(CS_VALENCE[CS == "control"], na.rm = TRUE),
+    diff_arousal = mean(CS_AROUSAL[CS == "threat"], na.rm = TRUE) -
+      mean(CS_AROUSAL[CS == "control"], na.rm = TRUE),
+    diff_shock   = mean(CS_SHOCK  [CS == "threat"], na.rm = TRUE) -
+      mean(CS_SHOCK  [CS == "control"], na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Run one-sample t-tests (vs. 0) for each measure per experiment × TUS
+cs_ttests_df <- cs_diff_df %>%
+  group_by(EXPERIMENT, TUS) %>%
+  summarise(
+    across(
+      starts_with("diff_"),
+      list(
+        mean = ~ mean(.x, na.rm = TRUE),
+        t    = ~ t.test(.x, mu = 0)$statistic,
+        df   = ~ t.test(.x, mu = 0)$parameter,
+        p    = ~ t.test(.x, mu = 0)$p.value
+      ),
+      .names = "{.col}_{.fn}"
+    ),
+    .groups = "drop"
+  )
+
+print(cs_ttests_df, n = Inf)
+
+cs_paired_ttests_df <- cs_diff_df %>%
+  tidyr::pivot_wider(
+    names_from = TUS,
+    values_from = c(diff_valence, diff_arousal, diff_shock)
+  ) %>%
+  dplyr::group_by(EXPERIMENT) %>%
+  dplyr::summarise(
+    
+    # VALENCE
+    t_valence  = as.numeric(t.test(diff_valence_active, diff_valence_sham, paired = TRUE)$statistic),
+    df_valence = as.numeric(t.test(diff_valence_active, diff_valence_sham, paired = TRUE)$parameter),
+    p_valence  = t.test(diff_valence_active, diff_valence_sham, paired = TRUE)$p.value,
+    
+    # AROUSAL
+    t_arousal  = as.numeric(t.test(diff_arousal_active, diff_arousal_sham, paired = TRUE)$statistic),
+    df_arousal = as.numeric(t.test(diff_arousal_active, diff_arousal_sham, paired = TRUE)$parameter),
+    p_arousal  = t.test(diff_arousal_active, diff_arousal_sham, paired = TRUE)$p.value,
+    
+    # SHOCK CONTINGENCY
+    t_shock    = as.numeric(t.test(diff_shock_active, diff_shock_sham, paired = TRUE)$statistic),
+    df_shock   = as.numeric(t.test(diff_shock_active, diff_shock_sham, paired = TRUE)$parameter),
+    p_shock    = t.test(diff_shock_active, diff_shock_sham, paired = TRUE)$p.value,
+    
+    .groups = "drop"
+    
+  )
+
+cs_paired_ttests_df <- cs_paired_ttests_df %>%
+  mutate(
+    dz_valence = ifelse(p_valence < 0.05, t_valence / sqrt(df_valence + 1), NA_real_),
+    dz_arousal = ifelse(p_arousal < 0.05, t_arousal / sqrt(df_arousal + 1), NA_real_),
+    dz_shock   = ifelse(p_shock   < 0.05, t_shock   / sqrt(df_shock   + 1), NA_real_)
+  )
+
+cs_paired_ttests_df
+
+#### TUS questionnaire #### 
+
+# Show counts
+cat("TUS_AUDITORY:\n")
+print(table(tus_quest_df$EXPERIMENT, tus_quest_df$TUS_AUDITORY))
+
+cat("TUS_TACTILE:\n")
+print(table(tus_quest_df$EXPERIMENT, tus_quest_df$TUS_TACTILE))
+
+cat("\nTUS_THERMAL:\n")
+print(table(tus_quest_df$EXPERIMENT, tus_quest_df$TUS_THERMAL))
+
+cat("\nTUS_PLACEBO:\n")
+print(table(tus_quest_df$EXPERIMENT, tus_quest_df$TUS_PLACEBO))
+
+# Step 6: Chi-squared or Fisher test for each
+chisq_or_fisher <- function(var) {
+  tbl <- table(tus_quest_df$EXPERIMENT, tus_quest_df[[var]])
+  if (any(tbl < 5)) {
+    test <- fisher.test(tbl)
+    method <- "Fisher's Exact Test"
+  } else {
+    test <- chisq.test(tbl)
+    method <- "Chi-squared Test"
+  }
+  cat(sprintf("%s (%s): p = %.4f\n", var, method, test$p.value))
+}
+
+chisq_or_fisher("TUS_AUDITORY")
+chisq_or_fisher("TUS_TACTILE")
+chisq_or_fisher("TUS_THERMAL")
+chisq_or_fisher("TUS_PLACEBO")

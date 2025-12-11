@@ -1,0 +1,698 @@
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+scr_df_time$TUS <- relevel(scr_df_time$TUS, ref = "active")
+
+# Subset to TIME == "early"
+scr_amy_acq_early <- subset(
+  scr_df_time,
+  EXPERIMENT == "amygdala" &
+    PHASE == "acquisition" &
+    US == "unreinforced" &
+    TIME == "early"
+)
+
+# Fit the simplified mixed model
+model_amy_acq_early <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS + (1 + CS + TUS | SUBID),
+  data = scr_amy_acq_early,
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+
+# Inspect model ANOVA (optional)
+anova(model_amy_acq_early)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#          Sum Sq  Mean Sq NumDF DenDF F value   Pr(>F)   
+# CS     0.074222 0.074222     1    24 10.9038 0.002997 **
+# TUS    0.000501 0.000501     1    24  0.0737 0.788396   
+# CS:TUS 0.060374 0.060374     1    24  8.8695 0.006536 **
+
+# Estimated marginal means and CS × TUS contrast
+emm_early <- emmeans(model_amy_acq_early, ~ CS * TUS, re_formula = NULL)
+cn_early  <- contrast(emm_early, interaction = "revpairwise")
+cn_early
+
+# CS_revpairwise   TUS_revpairwise estimate    SE df t.ratio p.value
+# control - threat sham - active    -0.0983 0.033 24  -2.978  0.0065 !!!
+
+t <- -2.987
+n <- 25
+dz <- t / sqrt(n)
+dz
+# -0.5974
+
+model_amy_acq_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  
+  data = subset(scr_df, 
+                EXPERIMENT == "amygdala" & 
+                  PHASE == "acquisition" & 
+                  TIME == "early" &
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_acq_unr_CSxTUSxTRIAL)
+
+#### evaluate TUS effect separately for each CS condition ####
+# slopes
+emmip(model_amy_acq_unr_CSxTUSxTRIAL, 
+      CS ~ TUS, 
+      by = "TRIAL",
+      re_formula = NULL,
+      CIs = TRUE)
+
+trend_results <- emtrends(model_amy_acq_unr_CSxTUSxTRIAL,
+                          pairwise ~ TUS | CS, 
+                          var = "TRIAL", 
+                          re_formula = NULL)
+trend_results
+# CS = control:
+# contrast      estimate      SE df t.ratio p.value
+# active - sham  0.00236 0.00205 24   1.153  0.2603
+# 
+# CS = threat:
+# contrast      estimate      SE df t.ratio p.value
+# active - sham  0.01431 0.00509 24   2.813  0.0096
+
+t <- 2.813
+n <- 25
+dz <- t / sqrt(n)
+dz
+# 0.5626
+
+
+
+scr_df_time <- scr_df %>%
+  filter(TRIAL != 1) %>% 
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+scr_df_time$TUS <- relevel(scr_df_time$TUS, ref = "active")
+
+scr_amy_ext_early <- subset(
+  scr_df_time,
+  EXPERIMENT == "amygdala" &
+    PHASE == "extinction" &
+    US == "unreinforced" &
+    TIME == "early"
+)
+
+model_amy_ext_early <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS + (1 + CS + TUS | SUBID),
+  data = scr_amy_ext_early,
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+anova(model_amy_ext_early)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#          Sum Sq  Mean Sq NumDF  DenDF F value  Pr(>F)   
+# CS     0.048024 0.048024     1 24.382  3.9823 0.05727 . 
+# TUS    0.033680 0.033680     1 46.627  2.7929 0.10138   
+# CS:TUS 0.095321 0.095321     1 48.000  7.9044 0.00712 **
+
+emm_early <- emmeans(model_amy_ext_early, ~ CS * TUS, re_formula = NULL)
+cn_early  <- contrast(emm_early, interaction = "revpairwise")
+cn_early
+
+# CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# control - threat sham - active     -0.123 0.0439 24  -2.811  0.0097
+
+t_val <- -2.811
+n <- 25
+d_z <- t_val / sqrt(n)
+d_z
+# -0.5622
+
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+scr_df_time$TUS <- relevel(scr_df_time$TUS, ref = "active")
+
+scr_df_time_acq_early_CS_TUS <- scr_df_time %>% 
+  filter(PHASE == "acquisition",
+         TIME == "early",
+         US == "unreinforced")
+
+# Fit the simplified mixed model
+model_exp_acq_early <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS * EXPERIMENT + (1 + CS + TUS | SUBID),
+  data = scr_df_time_acq_early_CS_TUS,
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+
+anova(model_exp_acq_early)
+# Type III Analysis of Variance Table with Satterthwaite's method
+#                     Sum Sq  Mean Sq NumDF  DenDF F value    Pr(>F)    
+# CS                0.143274 0.143274     1 48.001 23.9745 1.146e-05 ***
+# TUS               0.000017 0.000017     1 47.998  0.0028  0.958060    
+# EXPERIMENT        0.005536 0.005536     1 48.001  0.9263  0.340654    
+# CS:TUS            0.015381 0.015381     1 48.000  2.5737  0.115215    
+# CS:EXPERIMENT     0.004608 0.004608     1 48.001  0.7710  0.384267    
+# TUS:EXPERIMENT    0.001056 0.001056     1 47.998  0.1766  0.676156    
+# CS:TUS:EXPERIMENT 0.049939 0.049939     1 48.000  8.3564  0.005756 ** 
+
+eta_squared(model_exp_acq_early, partial = TRUE)
+# # Effect Size for ANOVA (Type III)
+# 
+# Parameter         | Eta2 (partial) |       95% CI
+# -------------------------------------------------
+# CS                |           0.33 | [0.16, 1.00]
+# TUS               |       5.82e-05 | [0.00, 1.00]
+# EXPERIMENT        |           0.02 | [0.00, 1.00]
+# CS:TUS            |           0.05 | [0.00, 1.00]
+# CS:EXPERIMENT     |           0.02 | [0.00, 1.00]
+# TUS:EXPERIMENT    |       3.67e-03 | [0.00, 1.00]
+# CS:TUS:EXPERIMENT |           0.15 | [0.03, 1.00]
+
+
+
+
+
+
+
+
+
+
+
+
+
+model_amy_ext_unr_CSxTUSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TUS * TIME + (1 + CS + TUS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" &
+                  PHASE == "extinction" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+emmeans_results <- emmeans(model_amy_ext_unr_CSxTUSxTIME, 
+                           pairwise ~ CS * TUS | TIME, 
+                           re_formula = NULL,
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+contrast(emmeans_results, interaction = "revpairwise")
+# $emmeans
+# TIME = early:
+#   CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# control - threat sham - active    -0.1235 0.0413 96  -2.990  0.0035
+# 
+# TIME = late:
+#   CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# control - threat sham - active    -0.0186 0.0413 96  -0.451  0.6527
+
+effectsize::t_to_d(t = -2.990, df = 96, sds_equal = TRUE, hedges.correction = FALSE)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ACQUISITION - AMYTUS #
+
+model_amy_acq_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  
+  data = subset(scr_df,
+                PHASE == "acquisition" & 
+                US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_ext_unr_CSxTUSxTRIAL)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+model_amy_acq_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  
+  data = subset(scr_df,
+                EXPERIMENT == "amygdala" &
+                  PHASE == "acquisition" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_acq_unr_CSxTUSxTRIAL)
+
+
+# slopes
+emmip(model_amy_acq_unr_CSxTUSxTRIAL, 
+      CS ~ TUS, 
+      by = "TRIAL",
+      re_formula = NULL,
+      CIs = TRUE)
+
+trend_results <- emtrends(model_amy_acq_unr_CSxTUSxTRIAL,
+                          pairwise ~ CS * TUS, 
+                          var = "TRIAL", 
+                          re_formula = NULL)
+
+contrast(trend_results, interaction = "revpairwise")
+
+
+# TUS effects on TRIAL slope within each CS
+trend_TUS_by_CS <- emtrends(
+  model_amy_acq_unr_CSxTUSxTRIAL,
+  ~ TUS | CS,
+  var = "TRIAL",
+  re_formula = NULL
+)
+
+# Pairwise contrasts of TUS within each CS (active vs sham)
+pairs(trend_TUS_by_CS, adjust = "tukey")
+
+
+
+model_amy_acq_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TIME + (1 + CS * TUS * TIME | SUBID),
+  
+  data = subset(scr_df,
+                EXPERIMENT == "amygdala" &
+                  PHASE == "extinction" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_acq_unr_CSxTUSxTRIAL)
+
+
+
+
+
+
+
+model_amy_ext_unr_CSxTUSxTRIAL <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * TRIAL + (1 + CS * TUS * TRIAL | SUBID),
+  
+  data = subset(scr_df,
+                PHASE == "acquisition" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_ext_unr_CSxTUSxTRIAL)
+
+
+
+
+model_hip_acq_unr_CSxTUSxTRIALxEXP <- lmer(
+  
+  SCR_sqrt ~ CS * TUS * EXPERIMENT + (1 + CS * TUS | SUBID),
+  
+  data = subset(scr_df, 
+                TIME == "early" &
+                  PHASE == "acquisition" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_hip_acq_unr_CSxTUSxTRIALxEXP)
+
+
+scr_df_time <- scr_df %>%
+  #filter(TRIAL != 1) %>% 
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+scr_df_time$TUS <- relevel(scr_df_time$TUS, ref = "active")
+
+
+model_acq_unr_CSxTUS <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TUS + (1 + CS + TUS | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" &
+                TIME == "early" &
+                  PHASE == "acquisition" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_acq_unr_CSxTUS)
+
+emmeans_results <- emmeans(model_acq_unr_CSxTUS, 
+                           pairwise ~ CS * TUS, 
+                           re_formula = NULL,
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+contrast(emmeans_results, interaction = "revpairwise")
+
+model_amy_acq_unr_CSxTUSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TUS * TIME + (1 + CS + TUS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" &
+                  PHASE == "acquisition" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+# Simple TUS effects within each CS at TIME = "early"
+emm_early_TUS_by_CS <- emmeans(
+  model_amy_acq_unr_CSxTUSxTIME,
+  ~ TUS | CS,
+  at = list(TIME = "early"),
+  re_formula = NULL
+)
+
+tus_contrasts_early <- pairs(emm_early_TUS_by_CS, adjust = "tukey")
+tus_contrasts_early
+
+# Cohen's d for pairwise TUS differences within each CS (uses model residual SD)
+es_early <- eff_size(
+  emm_early_TUS_by_CS,
+  sigma = sigma(model_amy_acq_unr_CSxTUSxTIME),
+  edf   = df.residual(model_amy_acq_unr_CSxTUSxTIME)  # Kenward–Roger is fine here
+  # method = "pairwise"  # (optional; default is pairwise)
+)
+es_early
+
+
+
+
+
+
+library(effectsize)
+t_to_d(t = -2.98, df = 24)
+
+model_acq_unr_CSxTUS <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TUS + (1 + CS + TUS | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" &
+                  TIME == "mid" &
+                  PHASE == "acquisition" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_acq_unr_CSxTUS)
+
+emmeans_results <- emmeans(model_acq_unr_CSxTUS, 
+                           pairwise ~ CS * TUS, 
+                           re_formula = NULL,
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+contrast(emmeans_results, interaction = "revpairwise")
+
+model_acq_unr_CSxTUS <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TUS + (1 + CS + TUS | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" &
+                  TIME == "late" &
+                  PHASE == "acquisition" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_acq_unr_CSxTUS)
+
+emmeans_results <- emmeans(model_acq_unr_CSxTUS, 
+                           pairwise ~ CS * TUS, 
+                           re_formula = NULL,
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+contrast(emmeans_results, interaction = "revpairwise")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+anova(model_acq_unr_CSxTUSxTIME)
+
+emmeans_results <- emmeans(model_amy_ext_unr_CSxTUSxTIME, 
+                           pairwise ~ CS | TUS, 
+                           re_formula = NULL,
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+contrast(emmeans_results, interaction = "revpairwise")
+
+
+
+
+
+scr_df_time <- scr_df %>%
+  filter(TRIAL != 1) %>% 
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+scr_df_time$TUS <- relevel(scr_df_time$TUS, ref = "active")
+
+model_amy_ext_unr_CSxTUS <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TUS + (1 + CS + TUS | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" & 
+                  TIME == "early" &
+                  PHASE == "extinction" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+anova(model_amy_ext_unr_CSxTUS)
+
+emmeans_results <- emmeans(model_amy_ext_unr_CSxTUS, 
+                           pairwise ~ CS * TUS, 
+                           re_formula = NULL,
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+contrast(emmeans_results, interaction = "revpairwise")
+
+
+# Compute Cohen’s d (standardized mean difference) for all pairwise contrasts
+es <- eff_size(
+  emmeans_results$emmeans,
+  sigma = sigma(model_amy_ext_unr_CSxTUS),
+  edf   = df.residual(model_amy_ext_unr_CSxTUS),
+  method = "pairwise"
+)
+
+summary(es, infer = TRUE)
+
+
+# Simple TUS effects within each CS at TIME = "early"
+emm_early_TUS_by_CS <- emmeans(
+  model_amy_ext_unr_CSxTUSxTIME,
+  ~ TUS | CS,
+  at = list(TIME = "early"),
+  re_formula = NULL
+)
+
+tus_contrasts_early <- pairs(emm_early_TUS_by_CS, adjust = "tukey")
+tus_contrasts_early
+
+# Cohen's d for pairwise TUS differences within each CS (uses model residual SD)
+es_early <- eff_size(
+  emm_early_TUS_by_CS,
+  sigma = sigma(model_amy_ext_unr_CSxTUSxTIME),
+  edf   = df.residual(model_amy_ext_unr_CSxTUSxTIME)  # Kenward–Roger is fine here
+  # method = "pairwise"  # (optional; default is pairwise)
+)
+es_early
+
+
+
+model_amy_ext_unr_CSxTUSxTIME <- lmer(
+  
+  SCR_sqrt_meanTime ~ CS * TUS * TIME + (1 + CS + TUS + TIME | SUBID),
+  
+  data = subset(scr_df_time, 
+                EXPERIMENT == "amygdala" &
+                  PHASE == "extinction" & 
+                  US == "unreinforced"),
+  
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap")
+  
+)
+
+
+
+
+
+# Your interaction contrasts (revpairwise)
+ct <- contrast(emmeans_results, interaction = "revpairwise")
+
+# Cohen's d–style SMD for each contrast, using the model's residual SD
+es <- eff_size(
+  ct,
+  sigma = sigma(model_amy_ext_unr_CSxTUS),
+  edf   = df.residual(model_amy_ext_unr_CSxTUS)
+)
+
+summary(es, infer = TRUE)  # shows SMD (Cohen's d), CI, etc.
+
+# Cohen's d for pairwise TUS differences within each CS (uses model residual SD)
+es_early <- eff_size(
+  emm_early_TUS_by_CS,
+  sigma = sigma(model_amy_ext_unr_CSxTUS),
+  edf   = df.residual(model_amy_ext_unr_CSxTUS)  # Kenward–Roger is fine here
+  # method = "pairwise"  # (optional; default is pairwise)
+)
+es_early
+
+emmeans_results <- emmeans(model_amy_ext_unr_CSxTUSxTIME, 
+                           pairwise ~ CS * TUS | TIME, 
+                           re_formula = NULL,
+                           adjust = "Tukey")  # Adjust p-values for multiple comparisons
+
+contrast(emmeans_results, interaction = "revpairwise")
+# $emmeans
+# TIME = early:
+#   CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# control - threat sham - active    -0.1235 0.0413 96  -2.990  0.0035
+# 
+# TIME = late:
+#   CS_revpairwise   TUS_revpairwise estimate     SE df t.ratio p.value
+# control - threat sham - active    -0.0186 0.0413 96  -0.451  0.6527

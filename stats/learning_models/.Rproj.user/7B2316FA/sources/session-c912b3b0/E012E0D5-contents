@@ -1,0 +1,173 @@
+## -------- Setup --------
+library(here)
+library(lmerTest)   # lme4 + p-values
+library(effectsize)
+library(glue)
+
+# Load the list of data frames saved earlier
+dfs <- readRDS(here::here("data", "lme_model_data_list.rds"))
+
+ctrl_nlopt <- lmerControl(
+  optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+  calc.derivs = FALSE,
+  optimizer = "nloptwrap",
+  check.conv.singular = "ignore"
+)
+
+# Helper to fetch a df from the list safely
+get_df <- function(name) {
+  if (!name %in% names(dfs)) stop("Data frame '", name, "' not found in list.")
+  dfs[[name]]
+}
+
+# Results accumulator (three columns as requested)
+model_results <- tibble::tibble(
+  data = character(),
+  `effect name` = character(),
+  stats = character()
+)
+
+# General runner: fit, ANOVA row, partial eta^2, pretty print, and APPEND to results
+run_lmer_test <- function(data_name, formula, effect_name, label = NULL) {
+  d <- get_df(data_name)
+  model <- lmer(formula, data = d, control = ctrl_nlopt)
+  
+  aov_tab <- anova(model)
+  if (!effect_name %in% rownames(aov_tab)) {
+    warning(glue("Effect '{effect_name}' not found in ANOVA table for {data_name}."))
+    print(aov_tab)
+    return(invisible(list(model = model, anova = aov_tab, eta = NA)))
+  }
+  
+  F_value <- format(aov_tab[effect_name, "F value"], digits = 2, nsmall = 2)
+  df_num  <- aov_tab[effect_name, "NumDF"]
+  df_den  <- round(aov_tab[effect_name, "DenDF"])
+  p_value <- aov_tab[effect_name, "Pr(>F)"]
+  p_fmt   <- ifelse(p_value < 1e-4, "<0.0001", format(p_value, digits = 4, nsmall = 4))
+  
+  eta <- eta_squared(model, partial = TRUE)
+  eta_val <- if (effect_name %in% eta$Parameter) {
+    sprintf("%.2f", eta$Eta2_partial[eta$Parameter == effect_name])
+  } else {
+    maybe <- grep(paste0("^", gsub("([: *()+-])", "\\\\\\1", effect_name), "$"),
+                  eta$Parameter, value = TRUE)
+    if (length(maybe)) sprintf("%.2f", eta$Eta2_partial[eta$Parameter == maybe[1]]) else "NA"
+  }
+  
+  # 1) Console (pretty, with ANSI italics)
+  stats_console <- glue("\033[3mF\033[0m({df_num}, {df_den}) = {F_value}, ",
+                        "\033[3mp\033[0m = {p_fmt}, ηₚ² = {eta_val}")
+  # 2) CSV/plain (no ANSI)
+  stats_csv <- glue("F({df_num}, {df_den}) = {F_value}, p = {p_fmt}, ηₚ² = {eta_val}")
+  
+  cat("\n-------------------------------------------\n",
+      "Data: ", data_name, "\n",
+      "Model:", deparse(formula), "\n",
+      if (!is.null(label)) paste0("Label: ", label, "\n") else "",
+      "Stats:", stats_console, "\n", sep = "")
+  
+  # append clean stats to results
+  row <- tibble::tibble(
+    data = sub("^scr_df_", "", data_name),
+    `effect name` = effect_name,
+    stats = as.character(stats_csv)
+  )
+  model_results <<- dplyr::bind_rows(model_results, row)
+  
+  invisible(list(model = model, anova = aov_tab, eta = eta))
+}
+
+## -------- Experiment I: sham (amygdala) --------
+
+# acquisition: CS
+run_lmer_test(
+  data_name = "scr_df_amy_acq_sham_CS",
+  formula   = SCR_sqrt ~ CS + (1 + CS | SUBID),
+  effect_name = "CS"
+)
+
+# acquisition: US
+run_lmer_test(
+  data_name = "scr_df_amy_acq_sham_US",
+  formula   = SCR_sqrt ~ US + (1 + US | SUBID),
+  effect_name = "US"
+)
+
+# acquisition: CS * TRIAL
+run_lmer_test(
+  data_name = "scr_df_amy_acq_sham_CS",
+  formula   = SCR_sqrt ~ CS * TRIAL + (1 + CS + TRIAL | SUBID),
+  effect_name = "CS:TRIAL"
+)
+
+# acquisition: CS * TIME (early/mid/late)
+run_lmer_test(
+  data_name = "scr_df_amy_acq_sham_CS_early",
+  formula   = SCR_sqrt_meanTime ~ CS + (1 | SUBID),
+  effect_name = "CS"
+)
+run_lmer_test(
+  data_name = "scr_df_amy_acq_sham_CS_mid",
+  formula   = SCR_sqrt_meanTime ~ CS + (1 | SUBID),
+  effect_name = "CS"
+)
+run_lmer_test(
+  data_name = "scr_df_amy_acq_sham_CS_late",
+  formula   = SCR_sqrt_meanTime ~ CS + (1 | SUBID),
+  effect_name = "CS"
+)
+
+# threat retention: RETENT * CS
+run_lmer_test(
+  data_name = "scr_df_amy_ret_sham_CS",
+  formula   = SCR_sqrt ~ RETENT * CS + (1 + RETENT + CS | SUBID),
+  effect_name = "RETENT:CS"
+)
+# CS main effect from same model
+run_lmer_test(
+  data_name = "scr_df_amy_ret_sham_CS",
+  formula   = SCR_sqrt ~ RETENT * CS + (1 + RETENT + CS | SUBID),
+  effect_name = "CS",
+  label = "CS main effect"
+)
+
+# extinction: CS * TRIAL
+run_lmer_test(
+  data_name = "scr_df_amy_ext_sham_CS",
+  formula   = SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  effect_name = "CS:TRIAL"
+)
+
+# extinction: CS * TIME (early/late)
+run_lmer_test(
+  data_name = "scr_df_amy_ext_sham_CS_early",
+  formula   = SCR_sqrt_meanTime ~ CS + (1 | SUBID),
+  effect_name = "CS"
+)
+run_lmer_test(
+  data_name = "scr_df_amy_ext_sham_CS_late",
+  formula   = SCR_sqrt_meanTime ~ CS + (1 | SUBID),
+  effect_name = "CS"
+)
+
+# recovery following reinstatement: REINST * CS
+run_lmer_test(
+  data_name = "scr_df_amy_rei_sham_CS",
+  formula   = SCR_sqrt ~ REINST * CS + (1 + REINST + CS | SUBID),
+  effect_name = "REINST:CS"
+)
+
+# CS main effect from same model
+run_lmer_test(
+  data_name = "scr_df_amy_rei_sham_CS",
+  formula   = SCR_sqrt ~ REINST * CS + (1 + REINST + CS | SUBID),
+  effect_name = "CS",
+  label = "CS main effect"
+)
+
+# re-extinction: CS * TRIAL
+run_lmer_test(
+  data_name = "scr_df_amy_reext_sham_CS",
+  formula   = SCR_sqrt ~ CS * TRIAL + (1 + CS * TRIAL | SUBID),
+  effect_name = "CS:TRIAL"
+)

@@ -1,0 +1,38 @@
+scr_df <- scr_df %>%
+  mutate(SUBID = if_else(
+    EXPERIMENT == "hippocampus",
+    sprintf("%02d", as.numeric(SUBID) + 25),  # add 25 and keep 2-digit format
+    SUBID
+  ))
+
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  )
+
+scr_df_time$CS <- relevel(scr_df_time$CS, ref = "threat")
+scr_df_time$TUS <- relevel(scr_df_time$TUS, ref = "active")
+
+scr_df_time_acq_early_CS_TUS <- scr_df_time %>% 
+  filter(PHASE == "acquisition",
+         TIME == "early",
+         US == "unreinforced")
+
+test <- lmer(
+  SCR_sqrt_meanTime ~ CS * TUS * EXPERIMENT + (1 + CS + TUS | SUBID),
+  data = scr_df_time_acq_early_CS_TUS,
+  control = lmerControl(
+    optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+    calc.derivs = FALSE,
+    optimizer = "nloptwrap"
+  )
+)
+
+anova(test)

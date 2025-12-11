@@ -1,0 +1,530 @@
+library(magrittr)
+library(dplyr)
+library(tidyr)
+library(lme4)
+library(lmerTest)
+library(effectsize)
+library(emmeans)
+library(glue)
+
+load("/Users/sjoerd.meijer/Documents/amyTUS/data/scr_df.RData")
+
+ctrl_nlopt <- lmerControl(
+  optCtrl = list(algorithm = "NLOPT_LN_BOBYQA"),
+  calc.derivs = FALSE,
+  optimizer = "nloptwrap",
+  check.conv.singular = "ignore"
+)
+
+#### Experiment I: sham (amygdala) ####
+# acquisition: CS #
+scr_df_amy_acq_sham_CS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TUS == "sham",
+         US == "unreinforced")
+
+scr_df_amy_acq_sham_CS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TUS == "sham",
+         US == "unreinforced")
+
+scr_df_amy_acq_sham_CS_early <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TIME == "early",
+         TUS == "sham",
+         US == "unreinforced")
+
+scr_df_amy_acq_sham_CS_mid <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TIME == "mid",
+         TUS == "sham",
+         US == "unreinforced")
+
+scr_df_amy_acq_sham_CS_late <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TIME == "late",
+         TUS == "sham",
+         US == "unreinforced")
+
+# acquisition: US #
+scr_df_amy_acq_sham_US <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TUS == "sham",
+         CS == "threat")
+
+# threat retention #
+
+scr_df_amy_ret_sham_CS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         !is.na(RETENT),
+         TUS == "sham",
+         US == "unreinforced")
+
+# extinction #
+
+scr_df_amy_ext_sham_CS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "extinction",
+         TUS == "sham")
+
+scr_df_amy_ext_sham_CS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "extinction",
+         TUS == "sham",
+         US == "unreinforced")
+
+scr_df_amy_ext_sham_CS_early <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "extinction",
+         TIME == "early",
+         TUS == "sham",
+         US == "unreinforced")
+
+scr_df_amy_ext_sham_CS_mid <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "extinction",
+         TIME == "mid",
+         TUS == "sham",
+         US == "unreinforced")
+
+scr_df_amy_ext_sham_CS_late <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "extinction",
+         TIME == "late",
+         TUS == "sham",
+         US == "unreinforced")
+
+# recovery following reinstatement #
+
+scr_df_amy_rei_sham_CS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         !is.na(REINST),
+         TUS == "sham",
+         US == "unreinforced")
+
+# re-extinction #
+
+scr_df_amy_reext_sham_CS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "re_extinction",
+         TUS == "sham")
+
+scr_df_amy_reext_sham_CS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "re_extinction",
+         TUS == "sham",
+         US == "unreinforced")
+
+#### Experiment I vs. II: sham (amygdala) vs. sham (hippcampus) ####
+
+# acquisition: CS #
+scr_df_exp_acq_sham_CS <- scr_df %>% 
+  filter(PHASE == "acquisition",
+         TUS == "sham",
+         US == "unreinforced")
+
+# acquisition: US #
+scr_df_exp_acq_sham_US <- scr_df %>% 
+  filter(PHASE == "acquisition",
+         TUS == "sham",
+         CS == "threat")
+
+# threat retention #
+
+scr_df_exp_ret_sham_CS <- scr_df %>% 
+  filter(!is.na(RETENT),
+         TUS == "sham",
+         US == "unreinforced")
+
+# extinction #
+
+scr_df_exp_ext_sham_CS <- scr_df %>% 
+  filter(PHASE == "extinction",
+         TUS == "sham")
+
+scr_df_exp_ext_sham_CS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "extinction",
+         TUS == "sham",
+         US == "unreinforced")
+
+# recovery following reinstatement #
+
+scr_df_exp_rei_sham_CS <- scr_df %>% 
+  filter(!is.na(REINST),
+         TUS == "sham",
+         US == "unreinforced")
+
+# re-extinction #
+
+scr_df_exp_reext_sham_CS <- scr_df %>% 
+  filter(PHASE == "re_extinction",
+         TUS == "sham")
+
+scr_df_exp_reext_sham_CS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "re_extinction",
+         TUS == "sham",
+         US == "unreinforced")
+
+#### Experiment I: active TUS vs. sham (amygdala) ####
+
+# acquisition: CS #
+scr_df_amy_acq_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         US == "unreinforced")
+
+# acquisition: US #
+scr_df_amy_acq_US_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         US == "reinforced")
+
+# acquisition: CS+US #
+scr_df_amy_acq_CSUS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         CS == "threat",
+         US == "reinforced")
+
+scr_df_amy_acq_CS_TUS_early <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TIME == "early",
+         US == "unreinforced")
+
+scr_df_amy_acq_CS_TUS_mid <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TIME == "mid",
+         US == "unreinforced")
+
+scr_df_amy_acq_CS_TUS_late <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TIME == "late",
+         US == "unreinforced")
+
+scr_df_amy_acq_CS_TUS_early_trial <- scr_df %>%
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "acquisition",
+         TIME == "early",
+         US == "unreinforced")
+
+# threat retention #
+
+scr_df_amy_ret_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         !is.na(RETENT),
+         US == "unreinforced")
+
+# extinction #
+
+scr_df_amy_ext_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "extinction")
+
+scr_df_amy_ext_CS_TUS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "extinction",
+         US == "unreinforced")
+
+scr_df_amy_ext_CS_TUS_early <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "extinction",
+         TIME == "early")
+
+scr_df_amy_ext_CS_TUS_late <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "extinction",
+         TIME == "late")
+
+scr_df_amy_ext_CS_TUS_early_trial <- scr_df %>%
+  filter(EXPERIMENT == "amygdala",
+         PHASE %in% c("extinction", "retention"),
+         TIME == "early")
+
+# recovery following reinstatement #
+
+scr_df_amy_rei_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         !is.na(REINST),
+         US == "unreinforced")
+
+# re-extinction #
+
+scr_df_amy_reext_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "re_extinction")
+
+scr_df_amy_reext_CS_TUS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "re_extinction",
+         US == "unreinforced")
+
+scr_df_amy_reext_CS_TUS_early <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "re_extinction",
+         TIME == "early")
+
+scr_df_amy_reext_CS_TUS_late <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "amygdala",
+         PHASE == "re_extinction",
+         TIME == "late")
+
+#### Experiment I: active vs. sham TUS (hippocampus) ####
+
+# acquisition: CS #
+scr_df_hip_acq_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "hippocampus",
+         PHASE == "acquisition",
+         US == "unreinforced")
+
+# acquisition: US #
+scr_df_hip_acq_US_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "hippocampus",
+         PHASE == "acquisition",
+         CS == "threat")
+
+# threat retention #
+
+scr_df_hip_ret_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "hippocampus",
+         !is.na(RETENT),
+         US == "unreinforced")
+
+# extinction #
+
+scr_df_hip_ext_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "hippocampus",
+         PHASE == "extinction")
+
+scr_df_hip_ext_CS_TUS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "hippocampus",
+         PHASE == "extinction",
+         US == "unreinforced")
+
+# recovery following reinstatement #
+
+scr_df_hip_rei_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "hippocampus",
+         !is.na(REINST),
+         US == "unreinforced")
+
+# re-extinction #
+
+scr_df_hip_reext_CS_TUS <- scr_df %>% 
+  filter(EXPERIMENT == "hippocampus",
+         PHASE == "re_extinction")
+
+scr_df_hip_reext_CS_TUS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(EXPERIMENT == "hippocampus",
+         PHASE == "re_extinction",
+         US == "unreinforced")
+
+
+#### Experiment I vs. II: amygdala vs. hippocampus ####
+
+# acquisition: CS #
+scr_df_exp_acq_CS_TUS <- scr_df %>% 
+  filter(PHASE == "acquisition",
+         US == "unreinforced")
+
+scr_df_exp_acq_CS_TUS_early <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "acquisition",
+         TIME == "early",
+         US == "unreinforced")
+
+scr_df_exp_acq_CS_TUS_mid <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "acquisition",
+         TIME == "mid",
+         US == "unreinforced")
+
+scr_df_exp_acq_CS_TUS_late <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "acquisition",
+         TIME == "late",
+         US == "unreinforced")
+
+scr_df_exp_acq_CS_TUS_early_trial <- scr_df %>%
+  filter(PHASE == "acquisition",
+         TIME == "early",
+         US == "unreinforced")
+
+# threat retention #
+
+scr_df_exp_ret_CS_TUS <- scr_df %>% 
+  filter(!is.na(RETENT),
+         US == "unreinforced")
+
+# extinction #
+
+scr_df_exp_ext_CS_TUS <- scr_df %>% 
+  filter(PHASE == "extinction")
+
+scr_df_exp_ext_CS_TUS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "extinction",
+         US == "unreinforced")
+
+scr_df_exp_ext_CS_TUS_early <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "extinction",
+         TIME == "early")
+
+scr_df_exp_ext_CS_TUS_late <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "extinction",
+         TIME == "late")
+
+scr_df_exp_ext_CS_TUS_early_trial <- scr_df %>%
+  filter(PHASE %in% c("extinction", "retention"),
+         TIME == "early")
+
+# recovery following reinstatement #
+
+scr_df_exp_rei_CS_TUS <- scr_df %>% 
+  filter(!is.na(REINST),
+         US == "unreinforced")
+
+# re-extinction #
+
+scr_df_exp_reext_CS_TUS <- scr_df %>% 
+  filter(PHASE == "re_extinction")
+
+scr_df_exp_reext_CS_TUS_time <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "re_extinction",
+         US == "unreinforced")
+
+scr_df_exp_reext_CS_TUS_early <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "re_extinction",
+         TIME == "early")
+
+scr_df_exp_reext_CS_TUS_late <- scr_df %>%
+  group_by(EXPERIMENT, SUBID, PHASE, TIME, TUS, CS, US) %>%
+  dplyr::summarise(
+    SCR_sqrt_meanTime = mean(SCR_sqrt, na.rm = TRUE)
+  ) %>% 
+  filter(PHASE == "re_extinction",
+         TIME == "late")

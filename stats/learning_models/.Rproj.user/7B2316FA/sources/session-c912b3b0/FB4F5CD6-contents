@@ -1,0 +1,664 @@
+load("/Volumes/project/3023001.06/experiments/scr_df.RData")
+
+scr <- scr_df %>%
+  filter(PHASE == "acquisition" & TUS == "active") %>%
+  mutate(
+    US = ifelse(US == "reinforced", 1, ifelse(US == "unreinforced", 0, NA)),
+    CUE = ifelse(EXPERIMENT == "amygdala" & CS == "control", 1, 
+                 ifelse(EXPERIMENT == "amygdala" & CS == "threat", 2, 
+                        ifelse(EXPERIMENT == "hippocampus" & CS == "control", 1,
+                               ifelse(EXPERIMENT == "hippocampus" & CS == "threat", 2,
+                                      NA))))
+  ) %>%
+  group_by(EXPERIMENT, SUBID) %>% # Group by subject # UPDATED: AND BY CUE
+  mutate(TRIAL = row_number()) %>%  # Create a trial variable for each subject
+  ungroup()  # Ungroup to return to a regular data frame
+
+scr <- scr %>%
+  mutate(SUBID = ifelse(EXPERIMENT == "hippocampus", 
+                        sprintf("%02d", as.numeric(SUBID) + 40),  # Add 40 and keep leading zeros
+                        SUBID)) %>%  # Keep original SUBID if not "hippocampus"
+  mutate(SUBID = factor(SUBID, levels = unique(SUBID)))  # Convert SUBID back to factor and preserve levels
+
+
+# Define data (replace these with actual values)
+N_SUB <-    as.numeric(length(unique(scr$SUBID)))  # Number of subjects
+N_TRIAL <-  as.numeric(length(unique(scr$TRIAL))) # UPDATED AFTER INTRODUCING CUE-SPECIFIC TRIAL COUNT: as.numeric(length(unique(scr$TRIAL)))  # Maximum number of trials per subject
+Tsubj <-    rep(N_TRIAL, N_SUB)                    # Number of trials per subject (vector of length N)
+
+# Create a unique row identifier for each observation
+scr_wide <- scr %>%
+  arrange(SUBID, BLOCK, TRIAL) %>%  # Ensure data is ordered correctly
+  group_by(SUBID) %>% 
+  mutate(SCR_sqrt = ifelse(SCR_sqrt < 0, 0, SCR_sqrt)) %>%  # Set SCR_sqrt to 0 if it's below 0
+  mutate(row_id = row_number()) %>%  # Create a row identifier per subject
+  ungroup() %>%
+  select(row_id, SUBID, SCR_sqrt) %>%  # Keep only the relevant columns
+  spread(key = SUBID, value = SCR_sqrt) %>%   # Spread across SUBID columns
+  select(-(row_id))
+
+# Create a unique row identifier for each observation
+us_wide <- scr %>%
+  arrange(SUBID, BLOCK, TRIAL) %>%  # Ensure data is ordered correctly
+  group_by(SUBID) %>% 
+  mutate(row_id = row_number()) %>%  # Create a row identifier per subject
+  ungroup() %>%
+  select(row_id, SUBID, US) %>%  # Keep only the relevant columns
+  spread(key = SUBID, value = US) %>%   # Spread across SUBID columns
+  select(-(row_id))
+
+# Create a unique row identifier for each observation
+cue_wide <- scr %>%
+  arrange(SUBID, BLOCK, TRIAL) %>%  # Ensure data is ordered correctly
+  group_by(SUBID) %>% 
+  mutate(row_id = row_number()) %>%  # Create a row identifier per subject
+  ungroup() %>%
+  select(row_id, SUBID, CUE) %>%  # Keep only the relevant columns
+  spread(key = SUBID, value = CUE) %>%   # Spread across SUBID columns
+  select(-(row_id))
+
+# Create data list for Stan
+data_RW_LR1_activeTUS_acq <- list(
+  
+  N = N_SUB,
+  T = N_TRIAL,
+  Tsubj = Tsubj,
+  CUE = cue_wide,
+  US = us_wide,
+  SCR = scr_wide
+  
+)
+
+model_RW_LR1_activeTUS_acq <- "
+data {
+  
+  int<lower=1> N;                     // Number of subjects
+  int<lower=1> T;                     // Maximum number of trials per subject
+  int<lower=1, upper=T> Tsubj[N];     // Number of trials for each subject
+  int<lower=1, upper=2> CUE[T, N];    // Stimulus type (1 = sham-safety; 2 = sham-threat; 3 = active-safety; 4 = active-threat)
+  int<lower=0, upper=1> US[T, N];     // Observed binary outcomes (0 = unreinforced trial; 1 = reinforced trial)
+  real<lower=0> SCR[T, N];            // Continuous SCR scores
+  
+}
+
+transformed data {
+  
+  vector<lower=0, upper=1>[2] initEV;  // Initial expected value for both cues UPDATED
+  initEV = rep_vector(1, 2);           // Initialize to 1
+  
+}
+
+parameters {
+  
+  // Population-level parameters
+  vector[6] mu_p;                      // Group-level means of parameters (hyper-prior)
+  vector<lower=0>[6] error_p;          // Group-level standard deviations (hyper-prior)
+  
+  // Subject-level parameters (raw for non-centered parameterization)
+  vector[N] LR_pr;                     // Learning rate (raw)
+  vector[N] UR_intercept_pr;           // Reinforced Response parameter (raw)
+  vector[N] UR_slope_pr;               // Reinforced Response parameter (raw)
+  vector[N] intercept_pr;              // Intercept (raw)
+  vector[N] slope_pr;                  // Slope (raw)
+  vector[N] error_pr;                  // Noise parameter (raw)
+  
+}
+
+transformed parameters {
+  
+  // Subject-level parameters
+  vector<lower=0,upper=1>[N] LR;       // Learning rate per subject [0, 1]
+  vector[N] UR_intercept;              // Unconditioned Response parameter per subject
+  vector[N] UR_slope;                  // Unconditioned Response parameter per subject
+  vector[N] intercept;                 // Intercept per subject
+  vector[N] slope;                     // Slope per subject
+  vector<lower=0>[N] error;            // Noise per subject [> 0]
+
+  // Transform raw parameters to actual values
+  LR = Phi_approx(mu_p[1] + error_p[1] * LR_pr);       // Constrain to [0, 1] range
+  UR_intercept = mu_p[2] + error_p[2] * UR_intercept_pr;                   // Contrain to positive values
+  UR_slope = mu_p[3] + error_p[3] * UR_slope_pr;                   // Contrain to positive values
+  intercept = mu_p[4] + error_p[4] * intercept_pr;
+  slope  = mu_p[5] + error_p[5] * slope_pr;
+  error = exp(mu_p[6] + error_p[6] * error_pr);        // Constrain to positive values
+  
+}
+
+model {
+
+  // Priors for hyperparameters
+  mu_p  ~ normal(0, 1); 
+  error_p ~ cauchy(0, 1);  
+  
+  // Priors for individual-level parameters (non-centered)
+  LR_pr ~ normal(1, 0.5);
+  UR_intercept_pr ~ normal(0, 0.5);
+  UR_slope_pr ~ normal(0, 0.5);
+  intercept_pr ~ normal(0, 0.5);
+  slope_pr  ~ normal(0, 0.5);
+  error_pr ~ cauchy(0, 1);
+
+  // Loop over subjects and trials
+  for (i in 1:N) {
+    
+    vector[2] EV = initEV;  // Initialize expected values for both cues
+    real PE;                // Prediction error
+
+    for (t in 1:(Tsubj[i])) {
+      
+      // Likelihood: observed score depends on EV and noise
+      SCR[t, i] ~ normal(intercept[i] + (US[t, i] * UR_intercept[i]) + slope[i] * EV[CUE[t, i]] + (US[t, i] * UR_slope[i]) * EV[CUE[t, i]], error[i]);
+      
+      // Calculate prediction error 
+      PE = US[t, i] - EV[CUE[t, i]];
+      
+      EV[CUE[t, i]] = EV[CUE[t, i]] + LR[i] * PE;
+      
+    }
+    
+  }
+  
+}
+
+generated quantities {
+
+  real log_lik[N];      // For log-likelihood calculation
+  
+  real SCR_sim[T, N];   // Simulated SCR data for posterior predictive checks
+  
+  real PE_trial[T, N];  // Stores PE for each trial and individual
+  real EV_trial[T, N];  // Stores EV for each trial and individual
+
+  // Local section to save time and space
+  { 
+    
+    for (i in 1:N) {
+      
+      vector[2] EV = initEV;
+      real PE;
+
+      // Initialize values
+      EV = initEV;
+      log_lik[i] = 0;
+
+      for (t in 1:(Tsubj[i])) {
+      
+        // Compute log likelihood for observed SCR data, update only for US == 0 trials
+        log_lik[i] = log_lik[i] + normal_lpdf(SCR[t, i] | intercept[i] + (US[t, i] * UR_intercept[i]) + slope[i] * EV[CUE[t, i]] + (US[t, i] * UR_slope[i]) * EV[CUE[t, i]], error[i]);
+        
+        // Simulate SCR scores for posterior predictive checks
+        SCR_sim[t, i] = normal_rng(intercept[i] + (US[t, i] * UR_intercept[i]) + slope[i] * EV[CUE[t, i]] + (US[t, i] * UR_slope[i]) * EV[CUE[t, i]], error[i]);
+      
+        // Calculate prediction error 
+        PE = US[t, i] - EV[CUE[t, i]];
+        
+        // Update expected values based on learning rate and prediction error
+        EV[CUE[t, i]] = EV[CUE[t, i]] + LR[i] * PE;
+        
+        // Store trial-level PE
+        PE_trial[t, i] = PE;
+        // Store trial-level EV
+        EV_trial[t, i] = EV[CUE[t, i]];
+        
+      }
+      
+    }
+    
+  }
+  
+}
+"
+
+fit_RW_LR1_activeTUS_acq <- stan(
+  model_code = model_RW_LR1_activeTUS_acq,
+  data = data_RW_LR1_activeTUS_acq,
+  iter = 2000,   # Total number of iterations
+  warmup = 200, # Number of warm-up iterations (out of total number of iterations)
+  chains = 4,
+  cores = 4,
+  seed = 123
+)
+
+
+#### NO ERRORS, CONVERGED #####
+
+# Define the destination file path
+destination_file <- "/Volumes/project/3023001.06/experiments/model_fits/fit_RW_LR1_activeTUS_acq.RData"
+load(destination_file)
+# Save the data frames to the file
+#save(fit_RW_LR1_activeTUS_acq, file = destination_file)
+
+#### Bulk Effective Samples Size (ESS) is too low, indicating posterior means and medians may be unreliable.
+#### Running the chains for more iterations may help. See
+
+# Extract the summary of the fitted model
+summary_fit <- summary(fit_RW_LR1_activeTUS_acq, pars = c("LR", "UR_intercept", "UR_slope", "intercept", "slope", "error"))
+summary_fit_RW_LR1_activeTUS_acq <- summary_fit
+# Define the destination file path
+destination_file <- "/Volumes/project/3023001.06/experiments/model_fits/summary_fit_RW_LR1_activeTUS_acq.RData"
+save(summary_fit_RW_LR1_activeTUS_acq, file = destination_file)
+
+# Extract the Rhat values
+rhat_values <- summary_fit$summary[, "Rhat"]
+
+# Identify parameters with Rhat >= 1.1
+non_converged <- rhat_values[rhat_values >= 1.1]
+
+# Print summary of Rhat
+cat("Number of parameters with Rhat >= 1.1:", length(non_converged), "\n")
+if (length(non_converged) > 0) {
+  cat("Parameters with Rhat >= 1.1:\n")
+  print(non_converged)
+} else {
+  cat("All parameters converged (Rhat < 1.1).\n")
+}
+
+# Plot Rhat distribution
+hist(rhat_values, main = "Rhat Distribution", xlab = "Rhat", col = "skyblue", breaks = 10)
+abline(v = 1.1, col = "red", lwd = 2, lty = 2)  # Mark threshold for non-convergence
+
+# Extract the means for the parameters and ensure they are numeric
+LR_values <- as.numeric(summary_fit$summary[grep("LR", rownames(summary_fit$summary)), "mean"])
+UR_intercept_values <- as.numeric(summary_fit$summary[grep("UR_intercept", rownames(summary_fit$summary)), "mean"])
+UR_slope_values <- as.numeric(summary_fit$summary[grep("UR_slope", rownames(summary_fit$summary)), "mean"])
+intercept_values <- as.numeric(summary_fit$summary[grep("^intercept\\[[0-9]+\\]$", rownames(summary_fit$summary)), "mean"])
+slope_values <- as.numeric(summary_fit$summary[grep("^slope\\[[0-9]+\\]$", rownames(summary_fit$summary)), "mean"])
+error_values <- as.numeric(summary_fit$summary[grep("error", rownames(summary_fit$summary)), "mean"])
+
+# Step 2: Subset the extracted parameter values to match the 4 selected subjects
+params_df <- data.frame(
+  LR = LR_values[1:50],
+  UR_intercept = UR_intercept_values[1:50],
+  UR_slope = UR_slope_values[1:50],
+  intercept = intercept_values[1:50],
+  slope = slope_values[1:50],
+  error = error_values[1:50]
+)
+
+# Step 1: Create a tidy data frame for ggplot
+params_df_long <- params_df %>%
+  gather(key = "Parameter", value = "Value")
+
+# Step 2: Create boxplots for A1, A2, alpha, beta, and sigma_er
+ggplot(params_df_long, aes(x = Parameter, y = Value)) +
+  geom_boxplot(fill = "skyblue", color = "black") +
+  labs(title = "Boxplots for Model Parameters",
+       x = "Parameter", y = "Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Step 1: Add a Experimenting variable for subjects (First 25 vs Second 25)
+params_df <- data.frame(
+  Subject = rep(1:50, times = 1),
+  Experiment = rep(c("Amygdala", "Hippocampus"), each = 25),
+  LR = LR_values[1:50],
+  UR_intercept = UR_intercept_values[1:50],
+  UR_slope = UR_slope_values[1:50],
+  intercept = intercept_values[1:50],
+  slope = slope_values[1:50],
+  error = error_values[1:50]
+)
+
+# Step 2: Tidy the data for ggplot
+params_df_long <- params_df %>%
+  gather(key = "Parameter", value = "Value", -Subject, -Experiment)
+
+# Reorder the 'Parameter' factor in params_df_long to specify the desired order
+params_df_long$Parameter <- factor(params_df_long$Parameter, 
+                                   levels = c("LR", "slope", "UR_slope", "intercept", "UR_intercept", "error"))
+
+# Step 3: Compute ANOVA p-values for each parameter
+anova_results <- params_df_long %>%
+  group_by(Parameter) %>%
+  dplyr::summarise(
+    p_value = summary(aov(Value ~ Experiment))[[1]][["Pr(>F)"]][1] # Extract p-value from ANOVA
+  )
+
+# Step 4: Add mean and SEM for each Experiment and parameter
+params_summary <- params_df_long %>%
+  group_by(Parameter, Experiment) %>%
+  dplyr::summarise(
+    mean_value = mean(Value, na.rm = TRUE),
+    sd_value = sd(Value, na.rm = TRUE),
+    sem_value = sd(Value, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) 
+
+params_summary <- params_summary %>%
+  dplyr::rename(Value = mean_value)
+
+# Step 5: Create the plot
+ggplot(params_df_long, aes(x = Experiment, y = Value, fill = Experiment)) +
+  geom_boxplot() +
+  geom_errorbar(data = params_summary, aes(x = Experiment, ymin = Value - sem_value, ymax = Value + sem_value),
+                width = 0.25, size = 2, color = "black") + # Add SEM error bars
+  geom_errorbar(data = params_summary, aes(x = Experiment, ymin = Value - sem_value, ymax = Value + sem_value),
+                width = 0.2, color = "white") + # Add SEM error bars
+  
+  geom_point(data = params_summary, aes(x = Experiment, y = Value), 
+             color = "black", size = 3, shape = 21, fill = "white") + # Add mean points
+  # geom_errorbar(data = params_summary, aes(x = Experiment, ymin = Value - sd_value, ymax = Value + sd_value), 
+  #               width = 0.2, color = "white") + # Add SD error bars
+  facet_wrap(~ Parameter, scales = "free_y") + # Separate plots for each parameter
+  labs(title = "Boxplots for Model Parameters with ANOVA Results",
+       x = "Experiment", y = "Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("#D55E00", "#0072B2")) + # Updated colors
+  geom_text(data = anova_results, aes(x = 1.5, y = Inf, label = paste0("p = ", signif(p_value, 3))), 
+            inherit.aes = FALSE, vjust = 1.5, hjust = 0.5) # Add p-values
+
+# Load necessary libraries
+library(GGally)
+library(ggplot2)
+
+# Assuming you have all other necessary data like LR_values, etc.
+params_df <- data.frame(
+  Subject = rep(1:50, times = 1),
+  Experiment = rep(c("Amygdala", "Hippocampus"), each = 25),
+  LR = LR_values[1:50],  # Ensure LR values are provided
+  intercept = intercept_values[1:50],
+  slope = slope_values[1:50],
+  error = error_values[1:50]
+)
+
+# Step 1: Convert Experiment to a numeric factor (1 for Amygdala, 2 for Hippocampus)
+params_df$Experiment <- as.numeric(factor(params_df$Experiment, levels = c("Amygdala", "Hippocampus")))
+
+# Step 2: Mutate to replace 2 with 1.5
+params_df <- params_df %>%
+  mutate(Experiment = ifelse(Experiment == 2, 1.5, Experiment))
+
+# Create a jittered Experiment variable for plotting
+set.seed(321)
+params_df$Experiment_jitter <- jitter(params_df$Experiment, amount = 0.15)
+
+# Create summary data for LR (mean and standard error)
+summary_data_LR <- params_df %>%
+  group_by(Experiment) %>%
+  dplyr::summarise(
+    mean_LR = mean(LR, na.rm = TRUE),
+    se_LR = sd(LR, na.rm = TRUE) / sqrt(n())
+  )
+
+summary_data_LR$Experiment <- as.numeric(summary_data_LR$Experiment, levels = c("Amygdala", "Hippocampus"), labels = c(1, 1.5))
+
+# Jitter the Experiment variable for the summary data
+summary_data_LR$Experiment_jitter <- jitter(summary_data_LR$Experiment, amount = 0.15)
+
+# Colors for the experiments
+amy_active_color = "#1F78B4"
+hip_active_color = "#996633"
+
+# Boxplot and summary plot
+boxplot_LR_acquisition <- ggplot(data = params_df, aes(x = Experiment_jitter, y = LR)) +
+  
+  # Add lines for individual subjects
+  geom_line(aes(group = Subject), color = 'lightgray', alpha = .3) +
+  
+  # Add points for individual subject LR values
+  geom_point(
+    data = params_df, 
+    aes(x = Experiment_jitter), 
+    shape = 21, 
+    fill = "white", 
+    color = "white", 
+    size = 3
+  ) +
+  
+  # Add colored points for each Experiment
+  geom_point(
+    data = params_df %>% filter(Experiment == 1), 
+    aes(x = Experiment_jitter), 
+    shape = 22, 
+    fill = amy_active_color, 
+    color = amy_active_color, 
+    size = 3,
+    alpha = .5
+  ) +
+  geom_point(
+    data = params_df %>% filter(Experiment == 1.5), 
+    aes(x = Experiment_jitter), 
+    shape = 21, 
+    fill = hip_active_color, 
+    color = hip_active_color, 
+    size = 3,
+    alpha = .5
+  ) +
+  
+  # Add summary points (mean LR)
+  geom_point(
+    data = summary_data_LR, 
+    aes(x = Experiment, y = mean_LR), 
+    colour = "black", 
+    size = 3, 
+    shape = 18, 
+    position = position_nudge(x = 0, y = 0)
+  ) +
+  
+  # Add error bars (SE for LR)
+  geom_errorbar(
+    data = summary_data_LR, 
+    aes(x = Experiment, y = mean_LR, ymin = mean_LR - se_LR, ymax = mean_LR + se_LR), 
+    width = 0.15, 
+    linewidth = 1, 
+    position = position_nudge(x = 0, y = 0)
+  ) +
+  
+  # Add dashed line for summary trend
+  geom_line(
+    data = summary_data_LR, 
+    aes(x = Experiment, y = mean_LR), 
+    color = 'black', 
+    size = .5, 
+    linetype = "dashed"
+  ) +
+  
+  # Set the x and y axis scale
+  scale_x_continuous(
+    breaks = c(1, 1.5),
+    labels = c("Amygdala", "Hippocampus")
+  ) +
+  scale_y_continuous(
+    limits = c(0, .25), 
+    breaks = c(0, 0.05, .1, .15, .2, 0.25),
+    labels = c("0", "0.05", "0.10", "0.15", "0.20", "0.25"),
+    expand = c(0, 0)
+  ) +
+  
+  # Add violins and boxplots
+  geom_half_violin(
+    data = params_df %>% filter(Experiment == 1), 
+    aes(x = Experiment, y = LR, group = as.factor(Experiment)), 
+    position = position_nudge(x = -.25), 
+    side = "l", 
+    fill = amy_active_color, 
+    alpha = .3, 
+    color = amy_active_color, 
+    trim = TRUE
+  ) +
+  geom_half_violin(
+    data = params_df %>% filter(Experiment == 1.5), 
+    aes(x = Experiment, y = LR, group = as.factor(Experiment)), 
+    position = position_nudge(x = .25), 
+    side = "r", 
+    fill = hip_active_color, 
+    alpha = .3, 
+    color = hip_active_color, 
+    trim = TRUE
+  ) +
+  
+  # Add boxplots
+  geom_boxplot(
+    data = params_df %>% filter(Experiment == 1),
+    aes(x = Experiment, y = LR, group = as.factor(Experiment)), 
+    position = position_nudge(x = -.25),
+    fill = "white", 
+    width = .1,
+    outlier.shape = 22,
+    outlier.colour = 'lightgray'
+  ) +
+  geom_boxplot(
+    data = params_df %>% filter(Experiment == 1.5),
+    aes(x = Experiment, y = LR, group = as.factor(Experiment)), 
+    position = position_nudge(x = .25),
+    fill = "white", 
+    width = .1,
+    outlier.shape = 21,
+    outlier.colour = 'lightgray'
+  ) +
+  
+  # Set theme and axis labels
+  theme_classic() +
+  xlab("") + 
+  ylab(expression(bold("Learning rate") * phantom(" ") * bold(alpha))) +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", colour = "black", vjust = 1, hjust = .5),   
+    axis.title.y = element_text(size = 14, face ="bold", colour = "black", lineheight = 1.3),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.y = element_text(size=14, colour= "black", hjust = .5),
+    axis.line.x = element_blank(), axis.title.x = element_blank())
+
+# Print the LR plot
+print(boxplot_LR_acquisition)
+
+# Step 2: Subset the extracted parameter values to match the 4 selected subjects
+params_df <- data.frame(
+  LR = LR_values[1:50],
+  UR_intercept = UR_intercept_values[1:50],
+  UR_slope = UR_slope_values[1:50],
+  intercept = intercept_values[1:50],
+  slope = slope_values[1:50],
+  error = error_values[1:50]
+)
+
+# Step 1: Create a tidy data frame for ggplot
+params_df_long <- params_df %>%
+  gather(key = "Parameter", value = "Value")
+
+# Step 2: Create a ggpairs plot to show pairwise correlations
+correlation_plot <- ggpairs(
+  params_df,
+  lower = list(
+    continuous = wrap("cor", size = 4, method = "pearson", stars = TRUE)  # Adds r and stars for p-values
+  ),
+  upper = list(
+    continuous = wrap("points", alpha = 0.5)  # Adds scatterplots
+  ),
+  diag = list(
+    continuous = wrap("densityDiag", alpha = 0.5)  # Adds density plots on the diagonal
+  )
+)
+
+# Step 3: Customize plot aesthetics
+correlation_plot <- correlation_plot + 
+  theme_minimal() +
+  labs(title = "Pairwise Correlations Between Model Parameters")
+
+# Step 4: Display the plot
+print(correlation_plot)
+
+source("/Volumes/project/3023001.06/experiments/code/15Oct2024/create_trialplot_shamBOTH_SCR.R")
+
+scr_df_filt <- scr_df %>%
+  mutate(SUBID = ifelse(EXPERIMENT == "hippocampus", 
+                        sprintf("%02d", as.numeric(SUBID) + 40),  # Add 40 and keep leading zeros
+                        SUBID)) %>%  # Keep original SUBID if not "hippocampus"
+  mutate(SUBID = factor(SUBID, levels = unique(SUBID)))  # Convert SUBID back to factor and preserve levels
+
+scr_df_filt <- scr_df_filt %>%
+  filter(PHASE == "acquisition" & TUS == "active") %>%
+  arrange(SUBID)
+
+# Plot observed vs predicted values
+observed_scr <- data_RW_LR1_activeTUS_acq$SCR  # Replace with actual observed data if available
+observed_scr <- observed_scr %>%
+  pivot_longer(cols = everything(), 
+               names_to = "SUBID", 
+               values_to = "SCR_obs") %>% 
+  arrange(SUBID) %>%
+  select(-c(SUBID))
+
+predicted_scr <- rstan::extract(fit_RW_LR1_activeTUS_acq, 
+                                pars = "SCR_sim", 
+                                permute = TRUE)$SCR_sim  # [num_samples, ntrials, nsubs]
+predicted_scr <- apply(predicted_scr, c(2, 3),
+                       mean, 
+                       na.rm = TRUE) %>% 
+  data.frame()
+predicted_scr <- predicted_scr %>%
+  pivot_longer(cols = everything(), names_to = "COLID", values_to = "SCR_pred") %>% 
+  arrange(COLID) %>% 
+  select(-c(COLID))
+
+plot_data <- cbind(scr_df_filt, observed_scr, predicted_scr)
+
+plot_data_SCR_pred <- plot_data
+
+plot_data_SCR_pred$SCR_sqrt <- plot_data$SCR_pred
+
+plot1 <- create_trialplot_shamBOTH_SCR(scr_df, acquisition, active, reinforced)
+plot2 <- create_trialplot_shamBOTH_SCR(subset(plot_data_SCR_pred, EXPERIMENT == "amygdala"), acquisition, active, reinforced)
+
+plot2 <- create_trialplot_shamBOTH_SCR(subset(plot_data_SCR_pred, EXPERIMENT == "hippocampus" & CS == "threat"), acquisition, active, reinforced)
+
+plot2 <- create_trialplot_shamBOTH_SCR(subset(plot_data_SCR_pred, EXPERIMENT == "amygdala" & CS == "threat"), acquisition, active, reinforced)
+
+plot2 <- create_trialplot_shamBOTH_SMOOTH_SCR(subset(plot_data_SCR_pred, EXPERIMENT == "amygdala" & US != "reinforced"), acquisition, active, reinforced)
+
+plot2 <- create_trialplot_shamBOTH_SMOOTH_SCR(subset(plot_data_SCR_pred, EXPERIMENT == "hippocampus" & US != "reinforced"), acquisition, active, reinforced)
+
+plot2 <- create_trialplot_shamBOTH_SMOOTH_SCR(subset(plot_data_SCR_pred, EXPERIMENT == "amygdala" & CS != "control"), acquisition, active, reinforced)
+
+plot2 <- create_trialplot_shamBOTH_SMOOTH_SCR(subset(plot_data_SCR_pred, EXPERIMENT == "hippocampus" & CS != "control"), acquisition, active, reinforced)
+
+grid.arrange(plot1, plot2, nrow = 1, ncol = 2)
+
+
+
+
+predicted_scr <- rstan::extract(fit_RW_LR1_activeTUS_acq, 
+                                pars = "EV_trial", 
+                                permute = TRUE)$EV_trial  # [num_samples, ntrials, nsubs]
+predicted_scr <- apply(predicted_scr, c(2, 3),
+                       mean, 
+                       na.rm = TRUE) %>% 
+  data.frame()
+predicted_scr <- predicted_scr %>%
+  pivot_longer(cols = everything(), names_to = "COLID", values_to = "SCR_pred") %>% 
+  arrange(COLID) %>% 
+  select(-c(COLID))
+
+plot_data <- cbind(scr_df_filt, observed_scr, predicted_scr)
+
+plot_data_SCR_pred <- plot_data
+
+plot_data_SCR_pred$SCR_sqrt <- plot_data$SCR_pred
+
+plot2 <- create_trialplot_shamBOTH_SCR(subset(plot_data_SCR_pred, EXPERIMENT == "amygdala"), acquisition, active, reinforced)
+plot2 <- create_trialplot_shamBOTH_SCR(subset(plot_data_SCR_pred, EXPERIMENT == "hippocampus"), acquisition, active, reinforced)
+
+predicted_scr <- rstan::extract(fit_RW_LR1_activeTUS_acq, 
+                                pars = "PE_trial", 
+                                permute = TRUE)$PE_trial  # [num_samples, ntrials, nsubs]
+predicted_scr <- apply(predicted_scr, c(2, 3),
+                       mean, 
+                       na.rm = TRUE) %>% 
+  data.frame()
+predicted_scr <- predicted_scr %>%
+  pivot_longer(cols = everything(), names_to = "COLID", values_to = "SCR_pred") %>% 
+  arrange(COLID) %>% 
+  select(-c(COLID))
+
+plot_data <- cbind(scr_df_filt, observed_scr, predicted_scr)
+
+plot_data_SCR_pred <- plot_data
+
+plot_data_SCR_pred$SCR_sqrt <- plot_data$SCR_pred
+
+plot2 <- create_trialplot_shamBOTH_SCR_PE(subset(plot_data_SCR_pred, EXPERIMENT == "amygdala"), acquisition, active, reinforced)
+plot2 <- create_trialplot_shamBOTH_SCR_PE(subset(plot_data_SCR_pred, EXPERIMENT == "hippocampus"), acquisition, active, reinforced)
+
+
+
